@@ -185,6 +185,12 @@ export interface TodoUpdatePayload {
   patch: TodoPatch;
 }
 
+/** 调整工作项顺序：offset -1 上移 / 1 下移。 */
+export interface TodoMovePayload {
+  id: string;
+  offset: -1 | 1;
+}
+
 export interface IdPayload {
   id: string;
 }

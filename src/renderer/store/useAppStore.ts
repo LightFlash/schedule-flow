@@ -114,6 +114,7 @@ export interface AppState {
   addTodo: (title: string) => Promise<void>;
   updateTodo: (id: string, patch: TodoPatch) => Promise<void>;
   toggleTodo: (id: string) => Promise<void>;
+  moveTodo: (id: string, offset: -1 | 1) => Promise<void>;
   deleteTodo: (id: string) => Promise<void>;
 
   // 设置
@@ -376,6 +377,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
   async toggleTodo(id) {
     try {
       await bridge.toggleTodo(id);
+      await get().refreshData();
+    } catch (error) {
+      get().showToast(describeError(error), 'error');
+    }
+  },
+
+  async moveTodo(id, offset) {
+    try {
+      await bridge.moveTodo(id, offset);
       await get().refreshData();
     } catch (error) {
       get().showToast(describeError(error), 'error');

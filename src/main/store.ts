@@ -291,6 +291,30 @@ export class StoreService {
     this.persistAndBroadcast();
   }
 
+  /** 调整工作项顺序：offset -1 上移 / 1 下移；越界静默忽略。 */
+  moveTodo(id: string, offset: -1 | 1): void {
+    const todos = this.store.get('todos');
+    const index = todos.findIndex((todo) => todo.id === id);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= todos.length) return;
+    const next = [...todos];
+    [next[index], next[target]] = [next[target], next[index]];
+    this.store.set('todos', next);
+    this.persistAndBroadcast();
+  }
+
+  /** 完成后自动沉底：把指定工作项移到清单末尾。 */
+  moveTodoToEnd(id: string): void {
+    const todos = this.store.get('todos');
+    const index = todos.findIndex((todo) => todo.id === id);
+    if (index < 0 || index === todos.length - 1) return;
+    const next = [...todos];
+    const [item] = next.splice(index, 1);
+    next.push(item);
+    this.store.set('todos', next);
+    this.persistAndBroadcast();
+  }
+
   toggleTodo(id: string): Todo {
     const todos = this.store.get('todos');
     const target = todos.find((todo) => todo.id === id);

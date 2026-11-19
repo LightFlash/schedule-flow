@@ -23,6 +23,7 @@ import type {
   StartWorkPayload,
   TestPushPayload,
   TodoAddPayload,
+  TodoMovePayload,
   TodoUpdatePayload,
   WindowKeyPayload,
   WindowPinnedPayload,
@@ -111,7 +112,28 @@ export class IpcRegistry {
     this.handle(IpcCommand.TODO_TOGGLE, (raw) => {
       const { id } = payloadOf<IdPayload>(raw);
       if (typeof id !== 'string') return fail('参数不完整');
-      return ok(this.store.toggleTodo(id));
+      const todo = this.store.getTodos().find((item) => item.id === id);
+      if (!todo) return fail('工作项不存在或已被删除');
+      // 勾选完成时若该项正在计时：先结算并停止计时（autoMarkComplete 可能已把项置为完成）。
+      if (!todo.completed && this.workTimer.getViewState().activeTodoId === id) {
+        this.workTimer.stop();
+      }
+      // 以最新状态计算勾选结果，避免 stop() 已置 completed 后 toggle 又把它翻回去。
+      const fresh = this.store.getTodos().find((item) => item.id === id);
+      const nowCompleted = !(fresh?.completed ?? todo.completed);
+      const updated = nowCompleted
+        ? this.store.updateTodo(id, { completed: true, completedAt: fresh?.completedAt ?? Date.now() })
+        : this.store.updateTodo(id, { completed: false, completedAt: null });
+      // 完成的任务自动沉底。
+      if (nowCompleted) this.store.moveTodoToEnd(id);
+      return ok(updated);
+    });
+
+    this.handle(IpcCommand.TODO_MOVE, (raw) => {
+      const { id, offset } = payloadOf<TodoMovePayload>(raw ?? {});
+      if (typeof id !== 'string' || (offset !== -1 && offset !== 1)) return fail('参数不完整');
+      this.store.moveTodo(id, offset);
+      return ok<void>();
     });
 
     this.handle(IpcCommand.SETTINGS_SAVE, (raw) => {

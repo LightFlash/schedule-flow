@@ -39,10 +39,13 @@ interface TodoRowProps {
   todo: Todo;
   isActive: boolean;
   compact: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
 }
 
-function TodoRow({ todo, isActive, compact }: TodoRowProps): ReactElement {
+function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = false }: TodoRowProps): ReactElement {
   const toggleTodo = useAppStore((state) => state.toggleTodo);
+  const moveTodo = useAppStore((state) => state.moveTodo);
   const updateTodo = useAppStore((state) => state.updateTodo);
   const startWork = useAppStore((state) => state.startWork);
   const pauseWork = useAppStore((state) => state.pauseWork);
@@ -90,9 +93,10 @@ function TodoRow({ todo, isActive, compact }: TodoRowProps): ReactElement {
       sx={{
         mb: compact ? 1 : 1.5,
         borderRadius: 2,
-        borderColor: status === 'running' ? 'primary.light' : 'divider',
-        bgcolor: status === 'running' ? '#F5F9FF' : 'background.paper',
-        boxShadow: status === 'running' ? 'inset 3px 0 0 #2563EB' : 'none',
+        borderColor: todo.completed ? '#E2E8F0' : status === 'running' ? 'primary.light' : 'divider',
+        bgcolor: todo.completed ? '#F8FAFC' : status === 'running' ? '#F5F9FF' : 'background.paper',
+        boxShadow: !todo.completed && status === 'running' ? 'inset 3px 0 0 #2563EB' : 'none',
+        opacity: todo.completed ? 0.85 : 1,
       }}
     >
       <ListItem disableGutters sx={{ px: compact ? 0.75 : 1, py: 0.5 }}>
@@ -136,8 +140,8 @@ function TodoRow({ todo, isActive, compact }: TodoRowProps): ReactElement {
         {!compact && (
           <Chip
             size="small"
-            label={isActive || status === 'running' ? '计时中' : STATUS_LABEL[status]}
-            color={isActive || status === 'running' ? 'primary' : 'default'}
+            label={todo.completed ? '已完成' : isActive || status === 'running' ? '计时中' : STATUS_LABEL[status]}
+            color={todo.completed ? 'success' : isActive || status === 'running' ? 'primary' : 'default'}
             variant="outlined"
             sx={{ mx: 1 }}
           />
@@ -145,20 +149,53 @@ function TodoRow({ todo, isActive, compact }: TodoRowProps): ReactElement {
         {!compact && <Chip size="small" label={formatDuration(liveAccumulatedMs)} sx={{ mr: 0.5 }} />}
 
         <Stack direction="row" spacing={0.25} alignItems="center" sx={{ flexShrink: 0 }}>
-          <Tooltip title={status === 'running' ? '暂停计时' : status === 'paused' ? '继续计时' : '开始计时'}>
-            <IconButton
-              size={compact ? 'small' : 'medium'}
-              aria-label={status === 'running' ? '暂停计时' : status === 'paused' ? '继续计时' : '开始计时'}
-              onClick={() => (status === 'running' ? void pauseWork() : handlePlay())}
-              sx={{
-                ...(compact && { width: 34, height: 34, borderRadius: 2 }),
-                color: status === 'running' ? 'warning.main' : status === 'idle' ? '#fff' : 'primary.main',
-                bgcolor: status === 'running' ? '#FEF3C7' : status === 'paused' ? '#EFF6FF' : 'primary.main',
-                '&:hover': { bgcolor: status === 'running' ? '#FDE68A' : status === 'paused' ? '#DBEAFE' : 'primary.dark', color: status === 'paused' || status === 'running' ? 'inherit' : '#fff' },
-              }}
-            >
-              <LucideIcon name={status === 'running' ? 'pause' : 'play'} size={compact ? 16 : 16} />
-            </IconButton>
+          {!compact && (
+            <>
+              <Tooltip title={canMoveUp ? '上移' : '已经在最上面'}>
+                <span>
+                  <IconButton
+                    size="small"
+                    aria-label="上移工作项"
+                    disabled={!canMoveUp}
+                    onClick={() => void moveTodo(todo.id, -1)}
+                    sx={{ color: '#94A3B8' }}
+                  >
+                    <LucideIcon name="chevron-up" size={16} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title={canMoveDown ? '下移' : '已经在最下面'}>
+                <span>
+                  <IconButton
+                    size="small"
+                    aria-label="下移工作项"
+                    disabled={!canMoveDown}
+                    onClick={() => void moveTodo(todo.id, 1)}
+                    sx={{ color: '#94A3B8' }}
+                  >
+                    <LucideIcon name="chevron-down" size={16} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </>
+          )}
+          <Tooltip title={todo.completed ? '已完成的工作项不可计时' : status === 'running' ? '暂停计时' : status === 'paused' ? '继续计时' : '开始计时'}>
+            <span>
+              <IconButton
+                size={compact ? 'small' : 'medium'}
+                aria-label={status === 'running' ? '暂停计时' : status === 'paused' ? '继续计时' : '开始计时'}
+                disabled={todo.completed}
+                onClick={() => (status === 'running' ? void pauseWork() : handlePlay())}
+                sx={{
+                  ...(compact && { width: 34, height: 34, borderRadius: 2 }),
+                  color: status === 'running' ? 'warning.main' : status === 'idle' ? '#fff' : 'primary.main',
+                  bgcolor: status === 'running' ? '#FEF3C7' : status === 'paused' ? '#EFF6FF' : 'primary.main',
+                  '&:hover': { bgcolor: status === 'running' ? '#FDE68A' : status === 'paused' ? '#DBEAFE' : 'primary.dark', color: status === 'paused' || status === 'running' ? 'inherit' : '#fff' },
+                }}
+              >
+                <LucideIcon name={status === 'running' ? 'pause' : 'play'} size={compact ? 16 : 16} />
+              </IconButton>
+            </span>
           </Tooltip>
           {status !== 'idle' && (
             <Tooltip title="停止并结算用时">
@@ -286,8 +323,15 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
         </Paper>
       ) : (
         <List disablePadding>
-          {todos.map((todo) => (
-            <TodoRow key={todo.id} todo={todo} isActive={activeTodoId === todo.id} compact={compact} />
+          {todos.map((todo, index) => (
+            <TodoRow
+              key={todo.id}
+              todo={todo}
+              isActive={activeTodoId === todo.id}
+              compact={compact}
+              canMoveUp={index > 0}
+              canMoveDown={index < todos.length - 1}
+            />
           ))}
         </List>
       )}
