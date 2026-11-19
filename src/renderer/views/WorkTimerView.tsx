@@ -23,9 +23,10 @@ import {
   Typography,
 } from '@mui/material';
 import { formatClock, formatDuration } from '@shared/time';
-import type { TimingStatus } from '@shared/types';
+import type { TimingStatus, Todo } from '@shared/types';
 import { useAppStore } from '../store/useAppStore';
 import LucideIcon from '../components/LucideIcon';
+import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 
 const STATUS_LABEL: Record<TimingStatus, string> = {
   idle: '未开始',
@@ -42,6 +43,7 @@ export default function WorkTimerView(): ReactElement {
   const resumeWork = useAppStore((state) => state.resumeWork);
 
   const [selectedId, setSelectedId] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Todo | null>(null);
 
   useEffect(() => {
     if (workTimer.activeTodoId) {
@@ -50,6 +52,13 @@ export default function WorkTimerView(): ReactElement {
       setSelectedId(todos[0].id);
     }
   }, [workTimer.activeTodoId, selectedId, todos]);
+
+  // 选中的工作项被删除后清空选择，避免 Select 悬空。
+  useEffect(() => {
+    if (selectedId !== '' && !todos.some((todo) => todo.id === selectedId)) {
+      setSelectedId('');
+    }
+  }, [todos, selectedId]);
 
   const isActiveItem = workTimer.activeTodoId !== null && workTimer.activeTodoId === selectedId;
   const displayTitle = isActiveItem ? workTimer.activeTitle : todos.find((t) => t.id === selectedId)?.title ?? '';
@@ -174,13 +183,26 @@ export default function WorkTimerView(): ReactElement {
                     label={active ? STATUS_LABEL[workTimer.status] : STATUS_LABEL[todo.timingStatus]}
                     color={active && workTimer.status === 'running' ? 'primary' : 'default'}
                     variant="outlined"
+                    sx={{ mr: 1 }}
                   />
+                  <Tooltip title="删除这条工作项">
+                    <IconButton
+                      size="small"
+                      aria-label={`删除工作项「${todo.title}」`}
+                      onClick={() => setDeleteTarget(todo)}
+                      sx={{ color: '#94A3B8', '&:hover': { bgcolor: '#FEF2F2', color: 'error.main' } }}
+                    >
+                      <LucideIcon name="trash" size={16} />
+                    </IconButton>
+                  </Tooltip>
                 </ListItem>
               );
             })}
           </List>
         )}
       </Paper>
+
+      <DeleteConfirmDialog todo={deleteTarget} onClose={() => setDeleteTarget(null)} />
     </Box>
   );
 }
