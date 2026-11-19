@@ -3,8 +3,8 @@
  * 删除二次确认。compact 模式用于极简小窗（添加区图标化、隐藏徽标）。
  */
 
-import { useState } from 'react';
-import type { DragEvent, MouseEvent, ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent, ReactElement, ReactNode } from 'react';
 import {
   Box,
   Button,
@@ -35,15 +35,113 @@ const STATUS_LABEL: Record<TimingStatus, string> = {
   paused: '已暂停',
 };
 
-/** 标准模式行拖拽排序的事件与视觉状态（compact 不启用）。 */
-interface TodoRowDnd {
-  draggable: boolean;
-  isDragging: boolean;
-  indicator: 'before' | 'after' | null;
-  onDragStart: (event: DragEvent<HTMLElement>) => void;
-  onDragOver: (event: DragEvent<HTMLElement>) => void;
-  onDrop: (event: DragEvent<HTMLElement>) => void;
-  onDragEnd: () => void;
+/**
+ * 可拖拽行容器：mousedown 跟手拖动 + 跨行交换 + FLIP 回位动画（无第三方依赖）。
+ * 实现参考 zhihu.com/p/556265103；onMove 触发相邻交换，松手时 onCommit 提交最终顺序。
+ */
+interface SortableRowProps {
+  index: number;
+  totalCount: number;
+  onMove: (from: number, to: number) => void;
+  onCommit: () => void;
+  children: ReactNode;
+}
+
+function SortableRow({ index, totalCount, onMove, onCommit, children }: SortableRowProps): ReactElement {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [top, setTop] = useState(0);
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const totalCountRef = useRef(totalCount);
+  totalCountRef.current = totalCount;
+  const onMoveRef = useRef(onMove);
+  onMoveRef.current = onMove;
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  const prevRectRef = useRef<DOMRect | null>(null);
+  const animationRef = useRef<Animation | null>(null);
+
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return undefined;
+    let startY = 0;
+
+    const onMouseMove = (event: globalThis.MouseEvent): void => {
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      let latestTop = event.clientY - startY;
+      // 拖动距离超过行高：与下一行 / 上一行交换，并同步修正基准，保证行始终跟手。
+      if (latestTop > rect.height && indexRef.current < totalCountRef.current - 1) {
+        onMoveRef.current(indexRef.current, indexRef.current + 1);
+        latestTop -= rect.height;
+        startY += rect.height;
+      } else if (latestTop < -rect.height && indexRef.current > 0) {
+        onMoveRef.current(indexRef.current, indexRef.current - 1);
+        latestTop += rect.height;
+        startY -= rect.height;
+      }
+      setTop(latestTop);
+    };
+    const onMouseUp = (event: globalThis.MouseEvent): void => {
+      event.preventDefault();
+      document.removeEventListener('mousemove', onMouseMove);
+      setTop(0);
+      setIsDragging(false);
+      onCommitRef.current();
+    };
+    const onMouseDown = (event: globalThis.MouseEvent): void => {
+      if (event.button !== 0) return;
+      // 从可交互元素上按下的拖拽忽略，避免干扰勾选 / 点击 / 编辑。
+      if ((event.target as HTMLElement).closest('input, textarea, button, a')) return;
+      event.preventDefault();
+      startY = event.clientY;
+      setIsDragging(true);
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp, { once: true });
+    };
+
+    el.addEventListener('mousedown', onMouseDown);
+    return () => {
+      el.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mousemove', onMouseMove);
+    };
+  }, []);
+
+  // FLIP：其它行位置变化时做回位动画（拖拽中的行不参与，松手后自然落位）。
+  useLayoutEffect(() => {
+    const el = rowRef.current;
+    if (!el || isDragging) return;
+    if (prevRectRef.current === null) {
+      prevRectRef.current = el.getBoundingClientRect();
+      return;
+    }
+    if (animationRef.current && animationRef.current.playState === 'running') {
+      animationRef.current.cancel();
+    }
+    const latest = el.getBoundingClientRect();
+    const deltaY = latest.y - prevRectRef.current.y;
+    prevRectRef.current = latest;
+    if (deltaY === 0) return;
+    animationRef.current = el.animate([{ top: `${-deltaY}px` }, { top: '0px' }], 200);
+  }, [index, isDragging]);
+
+  return (
+    <div
+      ref={rowRef}
+      style={{
+        position: 'relative',
+        top: isDragging ? `${top}px` : '0px',
+        zIndex: isDragging ? 10 : 0,
+        transform: isDragging ? 'scale(1.01)' : 'scale(1)',
+        transition: 'transform .2s, box-shadow .2s',
+        boxShadow: isDragging ? '0 10px 24px rgba(15, 23, 42, 0.18)' : 'none',
+        cursor: 'grab',
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 interface TodoRowProps {
@@ -52,10 +150,9 @@ interface TodoRowProps {
   compact: boolean;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
-  dnd?: TodoRowDnd;
 }
 
-function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = false, dnd }: TodoRowProps): ReactElement {
+function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = false }: TodoRowProps): ReactElement {
   const toggleTodo = useAppStore((state) => state.toggleTodo);
   const moveTodo = useAppStore((state) => state.moveTodo);
   const updateTodo = useAppStore((state) => state.updateTodo);
@@ -102,15 +199,6 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
   return (
     <Paper
       variant="outlined"
-      {...(dnd
-        ? {
-            draggable: dnd.draggable && !editing,
-            onDragStart: dnd.onDragStart,
-            onDragOver: dnd.onDragOver,
-            onDrop: dnd.onDrop,
-            onDragEnd: dnd.onDragEnd,
-          }
-        : {})}
       sx={{
         mb: compact ? 1 : 1.5,
         borderRadius: 2,
@@ -118,9 +206,6 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
         bgcolor: todo.completed ? '#F8FAFC' : status === 'running' ? '#F5F9FF' : 'background.paper',
         boxShadow: !todo.completed && status === 'running' ? 'inset 3px 0 0 #2563EB' : 'none',
         opacity: todo.completed ? 0.85 : 1,
-        ...(dnd?.isDragging && { opacity: 0.35, borderStyle: 'dashed' }),
-        ...(dnd?.indicator === 'before' && { borderTop: '2px solid', borderTopColor: 'primary.main' }),
-        ...(dnd?.indicator === 'after' && { borderBottom: '2px solid', borderBottomColor: 'primary.main' }),
       }}
     >
       <ListItem disableGutters sx={{ px: compact ? 0.75 : 1, py: 0.5 }}>
@@ -288,67 +373,31 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
   const reorderTodos = useAppStore((state) => state.reorderTodos);
   const [title, setTitle] = useState('');
 
-  // 拖拽排序（仅标准模式）：dragId 为按下的行，dropTarget 为悬停目标行与插入位置。
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string; place: 'before' | 'after' } | null>(null);
+  // 拖拽排序：拖动期间用本地顺序即时预览（跟手交换），松手一次性提交最终顺序。
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
 
-  const commitDrag = async (): Promise<void> => {
-    if (!dragId || !dropTarget || dropTarget.id === dragId) {
-      setDragId(null);
-      setDropTarget(null);
-      return;
-    }
-    const ids = todos.map((item) => item.id);
-    const from = ids.indexOf(dragId);
-    if (from < 0) {
-      setDragId(null);
-      setDropTarget(null);
-      return;
-    }
-    ids.splice(from, 1);
-    let insertAt = ids.indexOf(dropTarget.id);
-    if (dropTarget.place === 'after') insertAt += 1;
-    ids.splice(insertAt, 0, dragId);
-    setDragId(null);
-    setDropTarget(null);
-    await reorderTodos(ids);
+  const visibleTodos = useMemo<Todo[]>(() => {
+    if (!dragOrder) return todos;
+    const byId = new Map(todos.map((item) => [item.id, item]));
+    return dragOrder.map((id) => byId.get(id)).filter((item): item is Todo => Boolean(item));
+  }, [dragOrder, todos]);
+
+  const handleDragMove = (from: number, to: number): void => {
+    setDragOrder((previous) => {
+      const base = previous ?? todos.map((item) => item.id);
+      if (from < 0 || from >= base.length || to < 0 || to >= base.length) return previous;
+      const next = [...base];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
   };
 
-  const buildRowDnd = (id: string): TodoRowDnd | undefined =>
-    compact
-      ? undefined
-      : {
-          draggable: true,
-          isDragging: dragId === id,
-          indicator: dropTarget?.id === id ? dropTarget.place : null,
-          onDragStart: (event) => {
-            // 从按钮 / 输入框 / 链接上按下的拖拽不生效，避免误拖与干扰点击。
-            if ((event.target as HTMLElement).closest('button, input, a')) {
-              event.preventDefault();
-              return;
-            }
-            event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData('text/plain', id);
-            setDragId(id);
-          },
-          onDragOver: (event) => {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'move';
-            const rect = event.currentTarget.getBoundingClientRect();
-            const place = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-            setDropTarget((previous) =>
-              previous?.id === id && previous.place === place ? previous : { id, place },
-            );
-          },
-          onDrop: (event) => {
-            event.preventDefault();
-            void commitDrag();
-          },
-          onDragEnd: () => {
-            setDragId(null);
-            setDropTarget(null);
-          },
-        };
+  const handleDragCommit = (): void => {
+    const order = dragOrder;
+    if (order) void reorderTodos(order);
+    setDragOrder(null);
+  };
 
   const submit = (): void => {
     const trimmed = title.trim();
@@ -410,16 +459,22 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
         </Paper>
       ) : (
         <List disablePadding>
-          {todos.map((todo, index) => (
-            <TodoRow
+          {visibleTodos.map((todo, index) => (
+            <SortableRow
               key={todo.id}
-              todo={todo}
-              isActive={activeTodoId === todo.id}
-              compact={compact}
-              canMoveUp={index > 0}
-              canMoveDown={index < todos.length - 1}
-              dnd={buildRowDnd(todo.id)}
-            />
+              index={index}
+              totalCount={visibleTodos.length}
+              onMove={handleDragMove}
+              onCommit={handleDragCommit}
+            >
+              <TodoRow
+                todo={todo}
+                isActive={activeTodoId === todo.id}
+                compact={compact}
+                canMoveUp={index > 0}
+                canMoveDown={index < visibleTodos.length - 1}
+              />
+            </SortableRow>
           ))}
         </List>
       )}
