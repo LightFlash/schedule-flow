@@ -12,6 +12,7 @@ export const IpcCommand = {
   TODO_DELETE: 'todo:delete',
   TODO_TOGGLE: 'todo:toggle',
   TODO_MOVE: 'todo:move',
+  TODO_REORDER: 'todo:reorder',
   SETTINGS_SAVE: 'settings:save',
   SETTINGS_TEST_PUSH: 'settings:testPush',
   DATA_EXPORT: 'data:export',

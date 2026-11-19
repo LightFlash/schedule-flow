@@ -315,6 +315,21 @@ export class StoreService {
     this.persistAndBroadcast();
   }
 
+  /** 拖拽排序：按提交的完整 id 顺序重排；id 集合不一致时拒绝。 */
+  reorderTodos(ids: string[]): void {
+    const todos = this.store.get('todos');
+    if (!Array.isArray(ids) || ids.length !== todos.length) {
+      throw new Error('排序数据与清单不一致');
+    }
+    const byId = new Map(todos.map((todo) => [todo.id, todo]));
+    if (ids.some((id) => !byId.has(id))) {
+      throw new Error('排序数据与清单不一致');
+    }
+    const next = ids.map((id) => byId.get(id) as (typeof todos)[number]);
+    this.store.set('todos', next);
+    this.persistAndBroadcast();
+  }
+
   toggleTodo(id: string): Todo {
     const todos = this.store.get('todos');
     const target = todos.find((todo) => todo.id === id);

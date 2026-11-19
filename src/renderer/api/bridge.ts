@@ -28,6 +28,7 @@ import type {
   Todo,
   TodoAddPayload,
   TodoMovePayload,
+  TodoReorderPayload,
   TodoPatch,
   TodoUpdatePayload,
   WindowKeyPayload,
@@ -66,6 +67,8 @@ export const bridge = {
     invoke<Todo>(IpcCommand.TODO_TOGGLE, { id } satisfies IdPayload),
   moveTodo: (id: string, offset: -1 | 1): Promise<void> =>
     invoke<void>(IpcCommand.TODO_MOVE, { id, offset } satisfies TodoMovePayload),
+  reorderTodos: (ids: string[]): Promise<void> =>
+    invoke<void>(IpcCommand.TODO_REORDER, { ids } satisfies TodoReorderPayload),
   saveSettings: (settings: Settings): Promise<Settings> =>
     invoke<Settings>(IpcCommand.SETTINGS_SAVE, { settings }),
   testPush: (settings: Settings): Promise<PushResult[]> =>

@@ -91,3 +91,24 @@ test('moveTodo 上下移交换相邻位置，越界忽略、非法载荷拒绝',
   const bad = await invoke(IpcCommand.TODO_MOVE, { id: 'A', offset: 2 });
   assert.equal(bad.ok, false, 'offset 必须是 -1 或 1');
 });
+
+test('reorderTodos 按完整 id 顺序重排；集合不一致被拒绝', async () => {
+  const { store } = setup([
+    makeTodo({ id: 'A' }),
+    makeTodo({ id: 'B' }),
+    makeTodo({ id: 'C' }),
+  ]);
+
+  await invoke(IpcCommand.TODO_REORDER, { ids: ['C', 'A', 'B'] });
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['C', 'A', 'B']);
+
+  const mismatch = await invoke(IpcCommand.TODO_REORDER, { ids: ['C', 'A'] });
+  assert.equal(mismatch.ok, false, '数量不一致必须拒绝');
+
+  const unknown = await invoke(IpcCommand.TODO_REORDER, { ids: ['C', 'A', 'X'] });
+  assert.equal(unknown.ok, false, '未知 id 必须拒绝');
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['C', 'A', 'B'], '拒绝后顺序不变');
+
+  const empty = await invoke(IpcCommand.TODO_REORDER, { ids: [] });
+  assert.equal(empty.ok, false, '空数组拒绝');
+});

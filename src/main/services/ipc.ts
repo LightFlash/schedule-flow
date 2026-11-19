@@ -24,6 +24,7 @@ import type {
   TestPushPayload,
   TodoAddPayload,
   TodoMovePayload,
+  TodoReorderPayload,
   TodoUpdatePayload,
   WindowKeyPayload,
   WindowPinnedPayload,
@@ -134,6 +135,23 @@ export class IpcRegistry {
       if (typeof id !== 'string' || (offset !== -1 && offset !== 1)) return fail('参数不完整');
       this.store.moveTodo(id, offset);
       return ok<void>();
+    });
+
+    this.handle(IpcCommand.TODO_REORDER, (raw) => {
+      const { ids } = payloadOf<TodoReorderPayload>(raw ?? {});
+      if (
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        ids.some((id) => typeof id !== 'string')
+      ) {
+        return fail('参数不完整');
+      }
+      try {
+        this.store.reorderTodos(ids);
+        return ok<void>();
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : '排序失败');
+      }
     });
 
     this.handle(IpcCommand.SETTINGS_SAVE, (raw) => {

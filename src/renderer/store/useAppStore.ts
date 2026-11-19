@@ -115,6 +115,7 @@ export interface AppState {
   updateTodo: (id: string, patch: TodoPatch) => Promise<void>;
   toggleTodo: (id: string) => Promise<void>;
   moveTodo: (id: string, offset: -1 | 1) => Promise<void>;
+  reorderTodos: (ids: string[]) => Promise<void>;
   deleteTodo: (id: string) => Promise<void>;
 
   // 设置
@@ -386,6 +387,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
   async moveTodo(id, offset) {
     try {
       await bridge.moveTodo(id, offset);
+      await get().refreshData();
+    } catch (error) {
+      get().showToast(describeError(error), 'error');
+    }
+  },
+
+  async reorderTodos(ids) {
+    try {
+      await bridge.reorderTodos(ids);
       await get().refreshData();
     } catch (error) {
       get().showToast(describeError(error), 'error');

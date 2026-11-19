@@ -191,6 +191,11 @@ export interface TodoMovePayload {
   offset: -1 | 1;
 }
 
+/** 拖拽排序：提交拖拽后的完整新顺序（id 集合必须与现有清单一致）。 */
+export interface TodoReorderPayload {
+  ids: string[];
+}
+
 export interface IdPayload {
   id: string;
 }
