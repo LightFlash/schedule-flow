@@ -116,6 +116,7 @@ export default function WorkTimerView(): ReactElement {
             <>
               <Button
                 variant="contained"
+                color="warning"
                 startIcon={<LucideIcon name="pause" size={16} />}
                 onClick={() => void pauseWork()}
               >
@@ -125,7 +126,7 @@ export default function WorkTimerView(): ReactElement {
                 <IconButton
                   aria-label="停止并结算用时"
                   onClick={() => void stopWork()}
-                  sx={{ width: 40, height: 40, border: '1px solid', borderColor: 'divider', bgcolor: '#F8FAFC', color: 'text.secondary' }}
+                  sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#FEF2F2', color: 'error.main', '&:hover': { bgcolor: '#FEE2E2' } }}
                 >
                   <LucideIcon name="square" size={16} />
                 </IconButton>
@@ -145,7 +146,7 @@ export default function WorkTimerView(): ReactElement {
                 <IconButton
                   aria-label="停止并结算用时"
                   onClick={() => void stopWork()}
-                  sx={{ width: 40, height: 40, border: '1px solid', borderColor: 'divider', bgcolor: '#F8FAFC', color: 'text.secondary' }}
+                  sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#FEF2F2', color: 'error.main', '&:hover': { bgcolor: '#FEE2E2' } }}
                 >
                   <LucideIcon name="square" size={16} />
                 </IconButton>

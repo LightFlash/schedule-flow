@@ -182,10 +182,9 @@ export default function PomodoroView({ compact = false }: PomodoroViewProps): Re
             sx={{
               ...(!compact && { width: 40, height: 40 }),
               ...compactIconButtonSx,
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: '#F8FAFC',
-              color: 'text.secondary',
+              bgcolor: '#FEF2F2',
+              color: 'error.main',
+              '&:hover': { bgcolor: '#FEE2E2' },
             }}
           >
             <LucideIcon name="square" size={16} />
@@ -200,10 +199,9 @@ export default function PomodoroView({ compact = false }: PomodoroViewProps): Re
             sx={{
               ...(!compact && { width: 40, height: 40 }),
               ...compactIconButtonSx,
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: '#F8FAFC',
-              color: 'text.secondary',
+              bgcolor: '#FEF2F2',
+              color: 'error.main',
+              '&:hover': { bgcolor: '#FEE2E2' },
             }}
           >
             <LucideIcon name="reset" size={16} />
