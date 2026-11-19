@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+*.local
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 日志与临时文件
+*.log
+.tmp/
+coverage/
+tests/.build/
+
+# 构建过程生成的临时文件
+electron.vite.config.*.mjs
+/index.js

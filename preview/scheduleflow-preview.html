@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schedule Flow · UI 改动预览原型 v3</title>
+<!--
+  ============================================================================
+  Schedule Flow 桌面工具 —— UI 改动交互预览原型 v3（单文件 / 离线可用）
+  ----------------------------------------------------------------------------
+  v3 相对 v2 的调整（用户反馈）：
+   1) 图标全部换成 Lucide 线性 SVG（内联 sprite，不依赖 CDN），摒弃杂乱 emoji。
+   2) 置顶状态改为柔和同色系：未置顶=灰 pin；已置顶=浅蓝底 + 蓝 pin + 小蓝点，
+      不再是「灰 emoji → 实心蓝底白 emoji」的刺眼色差。
+   3) 番茄钟 / TODO 两个小窗改为独立窗口：标题栏拖动移动、右下角手柄缩放、
+      各自 ✕ 关闭、关闭后可从顶部「重新打开」恢复。
+   4) 番茄钟设置（参数）按钮移到卡片右上角，避免与开始按钮误按。
+   5) TODO 每一项备注改为「备注」图标按钮 + 弹窗编辑，不再内联展开 textarea。
+   6) 去掉界面内所有介绍性 ⓘ 说明浮窗（用户认为没用）。
+  保留：极简/标准/并排对比、真实倒计时、TODO 行内计时、添加横排、汇总三卡等宽。
+  ============================================================================
+-->
+<style>
+  :root{
+    --primary:#2563EB; --primary-dark:#1D4ED8; --primary-light:#60A5FA;
+    --success:#16A34A; --warning:#D97706; --error:#DC2626;
+    --bg:#F4F6FB; --paper:#fff; --text:#1E293B; --text2:#64748B;
+    --divider:#E2E8F0; --radius:14px; --radius-sm:10px;
+    --shadow:0 6px 24px rgba(15,23,42,.06);
+    --shadow-lift:0 14px 40px rgba(15,23,42,.13);
+    --font:"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh;padding-bottom:56px}
+  button,input,textarea{font-family:inherit}
+  button{cursor:pointer}
+  .hidden{display:none!important}
+  /* 统一 Lucide 图标：currentColor 继承按钮颜色 */
+  .ic{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;display:inline-block;vertical-align:middle}
+  .ic.sm{width:14px;height:14px}
+  .ic.lg{width:20px;height:20px}
+
+  /* ---------- 顶部说明 / 模式切换 ---------- */
+  .topbar{background:var(--paper);border-bottom:1px solid var(--divider);box-shadow:var(--shadow);padding:14px 28px 0;position:sticky;top:0;z-index:20}
+  .topbar-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;max-width:1500px;margin:0 auto}
+  .brand-block{display:flex;align-items:center;gap:12px}
+  .logo{width:42px;height:42px;flex:0 0 42px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(37,99,235,.28)}
+  .brand-title{font-size:16px;font-weight:700;color:var(--primary-dark)}
+  .notice{font-size:12px;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:3px 9px;display:inline-block;margin-top:3px}
+  .top-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mode-seg{display:inline-flex;gap:4px;padding:4px;background:#F1F5F9;border-radius:12px;border:1px solid var(--divider)}
+  .mode-seg button{border:0;background:transparent;color:var(--text2);padding:7px 14px;border-radius:9px;font-size:13px;font-weight:600;transition:.18s}
+  .mode-seg button:hover{color:var(--primary)}
+  .mode-seg button.active{background:var(--paper);color:var(--primary);box-shadow:0 2px 8px rgba(15,23,42,.10)}
+  .reopen-group{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .reopen-label{font-size:11px;color:var(--text2)}
+  .reopen-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid #BFDBFE;background:#EFF6FF;color:var(--primary-dark);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;transition:.18s}
+  .reopen-btn:hover{background:#DBEAFE}
+  .legend{max-width:1500px;margin:12px auto 0;padding:10px 0;border-top:1px dashed var(--divider);display:flex;align-items:center;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--text2)}
+  .legend kbd{display:inline-block;background:#EFF6FF;color:var(--primary);border:1px solid #BFDBFE;border-radius:5px;padding:0 5px;font-size:11px;font-weight:700;margin-right:4px}
+
+  /* ---------- 舞台 & 标准窗 ---------- */
+  .stage{max-width:1500px;margin:22px auto 0;padding:0 20px}
+  .mini-stage{position:relative;height:660px;max-width:100%}
+  body[data-mode="standard"] .mini-stage{display:none}
+  body[data-mode="mini"] .std-window{display:none}
+  .std-window{width:min(920px,100%);background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-lift);border:1px solid #E8EDF5;margin:0 auto;overflow:hidden}
+  body[data-mode="compare"] .std-window{margin-top:8px}
+
+  /* ---------- 窗口外壳（绝对定位，可拖动 / 缩放 / 关闭） ---------- */
+  .window{position:absolute;background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-lift);border:1px solid #E8EDF5;min-width:300px;min-height:200px;display:flex;flex-direction:column}
+  .window.is-moving{box-shadow:0 20px 52px rgba(15,23,42,.20);z-index:50}
+  .window.is-moving .window-titlebar{cursor:grabbing}
+  .window-titlebar{min-height:42px;flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:0 8px 0 11px;border-bottom:1px solid var(--divider);background:#FAFBFD;border-radius:var(--radius) var(--radius) 0 0;cursor:grab;user-select:none;transition:background .25s}
+  body[data-pinned="true"] .window-titlebar{background:linear-gradient(90deg,#EFF6FF,#fff 70%)}
+  .win-dots{display:flex;gap:5px;flex:0 0 auto}
+  .win-dots i{width:9px;height:9px;border-radius:50%;display:block}
+  .win-dots i:nth-child(1){background:#F87171}.win-dots i:nth-child(2){background:#FBBF24}.win-dots i:nth-child(3){background:#34D399}
+  .win-name{font-size:12px;font-weight:700;color:var(--text2);white-space:nowrap}
+  .titlebar-spacer{flex:1 1 auto;min-width:2px}
+  .tb-btn{flex:0 0 auto;width:28px;height:28px;border-radius:8px;border:1px solid transparent;background:transparent;color:#94A3B8;display:inline-flex;align-items:center;justify-content:center;transition:.16s;padding:0}
+  .tb-btn:hover{background:#F1F5F9;color:var(--text)}
+  /* 置顶：激活时按钮整体变蓝（填充+白图标），状态一眼可辨，不再靠小蓝点 */
+  .pin-btn{position:relative;background:#F8FAFC;border-color:#E2E8F0;color:#94A3B8;transition:.2s}
+  .pin-btn:hover{color:#64748B;border-color:#CBD5E1}
+  .pin-btn.active{background:var(--primary);border-color:var(--primary-dark);color:#fff;box-shadow:0 3px 10px rgba(37,99,235,.32)}
+  .pin-btn.active:hover{background:var(--primary-dark);color:#fff}
+  .close-btn:hover{background:#FEE2E2;color:var(--error)}
+  .mode-tb{border-color:#E2E8F0;background:#F8FAFC;color:var(--primary)}
+  .mode-tb:hover{background:#EFF6FF;color:var(--primary-dark)}
+  /* 右下角缩放手柄 */
+  .resize-handle{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;border-radius:0 0 var(--radius) 0;
+    background:linear-gradient(135deg,transparent 52%,#CBD5E1 52%,#CBD5E1 62%,transparent 62%,transparent 74%,#CBD5E1 74%,#CBD5E1 84%,transparent 84%)}
+
+  /* ---------- 通用按钮 / 徽标 ---------- */
+  .btn{border:0;border-radius:var(--radius-sm);font-weight:600;padding:8px 14px;font-size:13px;transition:.18s;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .btn-primary{background:var(--primary);color:#fff;box-shadow:0 3px 10px rgba(37,99,235,.22)}
+  .btn-primary:hover{background:var(--primary-dark)}
+  .btn-ghost{background:#F1F5F9;color:var(--text2)}
+  .btn-ghost:hover{background:#E2E8F0}
+  .btn-pomo{background:var(--primary);color:#fff}
+  .btn-pomo:hover{background:var(--primary-dark)}
+  .icon-btn{border:1px solid transparent;background:transparent;color:var(--text2);width:28px;height:28px;flex:0 0 28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:.18s}
+  .icon-btn:hover{background:#F1F5F9;color:var(--primary)}
+  .ico-btn{flex:0 0 auto;width:34px;height:34px;border-radius:9px;border:0;display:inline-flex;align-items:center;justify-content:center;transition:.18s;padding:0}
+  .ico-btn.primary{background:var(--primary);color:#fff;box-shadow:0 3px 10px rgba(37,99,235,.22)}
+  .ico-btn.primary:hover{background:var(--primary-dark)}
+  .ico-btn.primary.running{background:var(--warning);box-shadow:0 3px 10px rgba(217,119,6,.25)}
+  .ico-btn.ghost{background:#F1F5F9;color:var(--text2)}
+  .ico-btn.ghost:hover{background:#E2E8F0;color:var(--text)}
+  .ico-btn.paused{background:#EFF6FF;color:var(--primary-dark);border:1px solid #93C5FD}
+  .ico-btn.stop{background:#FEF2F2;color:var(--error)}
+  .ico-btn.stop:hover{background:#FEE2E2}
+  .chip{display:inline-flex;align-items:center;gap:3px;border-radius:8px;padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap}
+  .chip-status{border:1px solid var(--divider);color:var(--text2);background:#F8FAFC}
+  .chip-status.running{border-color:#FCD34D;color:#B45309;background:#FFFBEB}
+  .chip-status.paused{border-color:#BFDBFE;color:var(--primary);background:#EFF6FF}
+  .chip-time{background:#F1F5F9;color:var(--text2);font-variant-numeric:tabular-nums}
+  .change-tag{display:none}
+  /* 放松极简 TODO 小窗的排版：添加区与清单之间留出呼吸感 */
+  .mini-todo-window .add-area{margin-bottom:16px}
+  .mini-todo-window .section-head{margin:0 0 10px 2px}
+  .mini-todo-window .section-title{font-size:12px;color:var(--text2);font-weight:700;letter-spacing:.3px}
+
+  /* ---------- ① 极简番茄钟小窗 ---------- */
+  .mini-body{flex:1 1 auto;overflow:auto;padding:14px}
+  .pomo-card{border:1px solid var(--divider);border-radius:var(--radius);background:linear-gradient(180deg,#fff,#FBFCFF);padding:10px 14px 12px;text-align:center;position:relative}
+  .pomo-card.is-running{border-color:#BFDBFE;background:linear-gradient(180deg,#F8FBFF,#F3F7FF)}
+  /* 设置按钮固定在卡片右上角，远离底部开始按钮，防误按 */
+  .pomo-cfg{position:absolute;right:9px;top:9px;width:30px;height:30px;border-radius:8px;border:1px solid var(--divider);background:#F8FAFC;color:var(--text2);display:inline-flex;align-items:center;justify-content:center;transition:.18s;padding:0;z-index:2}
+  .pomo-cfg:hover,.pomo-cfg.active{background:#EFF6FF;color:var(--primary);border-color:#BFDBFE}
+  .pomo-ring{position:relative;width:138px;height:138px;margin:6px auto 6px}
+  .ring-svg{width:100%;height:100%;transform:rotate(-90deg)}
+  .ring-track,.ring-bar{fill:none;stroke-width:9}
+  .ring-track{stroke:#E8EEF9}
+  .ring-bar{stroke:var(--primary);stroke-linecap:round;transition:stroke-dashoffset .5s linear,stroke .3s}
+  .ring-bar.is-break{stroke:var(--warning)}
+  .ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .ring-time{font-size:28px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+  .ring-phase{font-size:11px;color:var(--text2)}
+  .pomo-actions{display:flex;justify-content:center;align-items:center;gap:8px}
+  .pomo-tip{font-size:11px;color:#94A3B8;margin-top:9px}
+  /* 设置展开面板 */
+  .pomo-settings{margin-top:10px;padding:10px 12px;border:1px solid var(--divider);border-radius:var(--radius-sm);background:#F8FAFC;text-align:left;animation:pop-in .18s ease}
+  @keyframes pop-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+  /* 居中弹窗专用：动画必须保留 translate(-50%,-50%) 偏移，否则会在动画结束时跳位 */
+  @keyframes pop-center{from{opacity:0;transform:translate(-50%,-50%) scale(.97)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+  .cfg-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--text2)}
+  .cfg-row>span:first-child{width:62px;flex:0 0 62px;font-weight:600;color:var(--text)}
+  .stepper{display:inline-flex;align-items:center;border:1px solid var(--divider);border-radius:8px;overflow:hidden;background:#fff}
+  .stepper button{width:28px;height:28px;border:0;background:#fff;color:var(--primary);font-size:16px;font-weight:700}
+  .stepper button:hover{background:#EFF6FF}
+  .stepper b{min-width:38px;text-align:center;font-size:13px;color:var(--text);font-variant-numeric:tabular-nums}
+  .cfg-unit{font-size:11px;color:#94A3B8}
+  .cfg-apply{width:100%;margin-top:8px;height:32px;font-size:12px}
+  /* 标准模式番茄钟（更大） */
+  .view-pomodoro-wrap{max-width:520px;margin:0 auto}
+  .view-pomodoro-wrap .pomo-ring{width:188px;height:188px}
+  .view-pomodoro-wrap .ring-time{font-size:38px}
+  .view-pomodoro-wrap .pomo-actions .btn{min-width:96px}
+
+  /* ---------- ② TODO 行内计时 + 备注弹窗按钮 ---------- */
+  .todo-list{display:flex;flex-direction:column;gap:8px}
+  .todo-row{border:1px solid var(--divider);border-radius:var(--radius-sm);background:#fff;transition:.18s}
+  .todo-row:hover{border-color:#BFDBFE}
+  .todo-row.is-timing{border-color:#BFDBFE;background:#F5F9FF;box-shadow:inset 3px 0 0 var(--primary)}
+  .todo-row.is-done{background:#FAFBFD}
+  .todo-line{display:flex;align-items:center;gap:8px;padding:9px 10px}
+  .cb{position:relative;display:inline-flex;width:20px;height:20px;flex:0 0 20px;cursor:pointer}
+  .cb input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+  .cb-face{width:20px;height:20px;border:2px solid #CBD5E1;border-radius:6px;background:#fff;color:transparent;display:flex;align-items:center;justify-content:center;transition:.18s}
+  .cb-face .ic{width:13px;height:13px;stroke-width:3}
+  .cb input:checked+.cb-face{background:var(--success);border-color:var(--success);color:#fff}
+  .todo-copy{flex:1 1 auto;min-width:0}
+  .todo-title{font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .todo-row.is-done .todo-title{text-decoration:line-through;color:var(--text2)}
+  .todo-meta{font-size:11px;color:var(--text2);margin-top:1px}
+  .todo-ops{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+  .btn-timer{font-size:12px;padding:6px 10px;border-radius:8px;min-width:34px;border:0;display:inline-flex;align-items:center;justify-content:center;gap:4px}
+  .btn-timer.idle{background:var(--primary);color:#fff}
+  .btn-timer.idle:hover{background:var(--primary-dark)}
+  .btn-timer.running{background:var(--warning);color:#fff;box-shadow:0 0 0 3px rgba(217,119,6,.16)}
+  .btn-timer.paused{background:#EFF6FF;color:var(--primary-dark);border:1px solid #93C5FD}
+  .note-btn{width:30px;height:30px;border-radius:8px;border:1px solid var(--divider);background:#fff;color:var(--text2);display:inline-flex;align-items:center;justify-content:center;transition:.18s;padding:0}
+  .note-btn:hover{background:#EFF6FF;color:var(--primary);border-color:#BFDBFE}
+  .note-btn.has-note{color:var(--primary);background:#EFF6FF;border-color:#BFDBFE}
+  /* 删除按钮：平时低调，悬停转红 */
+  .del-btn{width:30px;height:30px;border-radius:8px;border:1px solid var(--divider);background:#fff;color:#94A3B8;display:inline-flex;align-items:center;justify-content:center;transition:.18s;padding:0}
+  .del-btn:hover{background:#FEF2F2;color:#DC2626;border-color:#FECACA}
+  .empty-state{text-align:center;color:var(--text2);font-size:12px;padding:22px 10px;border:1px dashed var(--divider);border-radius:var(--radius-sm)}
+  /* 极简 TODO 小窗：隐藏文字徽标，用时放副标题 */
+  .mini-todo-window .chip-status,.mini-todo-window .chip-time{display:none}
+
+  /* ---------- ③ 添加区 ---------- */
+  .add-area{position:relative}
+  .add-row{display:flex;align-items:center;gap:8px}
+  .add-input{flex:1 1 auto;min-width:0;height:36px;border:1px solid var(--divider);border-radius:var(--radius-sm);padding:0 10px;font-size:12px;color:var(--text);outline:none;background:#fff}
+  .add-input::placeholder{color:#94A3B8}
+  .add-input:focus{border-color:var(--primary-light);box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+  .add-btn{flex:0 0 auto;min-width:96px;height:36px;white-space:nowrap;word-break:keep-all;background:var(--primary);color:#fff;border:0;border-radius:var(--radius-sm);font-size:13px;font-weight:700;box-shadow:0 3px 10px rgba(37,99,235,.22);display:inline-flex;align-items:center;justify-content:center;gap:5px}
+  .add-btn:hover{background:var(--primary-dark)}
+  .add-ico{flex:0 0 auto;width:36px;height:36px;border:0;border-radius:var(--radius-sm);background:var(--primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(37,99,235,.22)}
+  .add-ico:hover{background:var(--primary-dark)}
+  .section-head{display:flex;align-items:center;gap:7px;margin-bottom:2px}
+  .section-title{font-size:13px;font-weight:700;color:var(--text)}
+
+  /* ---------- 标准模式 ---------- */
+  .std-layout{display:flex;min-height:560px}
+  .sidebar{width:180px;flex:0 0 180px;background:#fff;border-right:1px solid var(--divider);padding:14px 10px;display:flex;flex-direction:column;border-radius:0 0 0 var(--radius)}
+  .side-brand{padding:4px 8px 12px;border-bottom:1px solid var(--divider);margin-bottom:10px}
+  .side-brand b{font-size:14px;color:var(--primary-dark)}
+  .side-brand small{display:block;color:var(--text2);font-size:11px}
+  .nav-btn{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;color:var(--text2);padding:9px 12px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;text-align:left;margin-bottom:4px;transition:.18s}
+  .nav-btn:hover{background:#F8FAFC;color:var(--primary)}
+  .nav-btn.active{background:#EFF6FF;color:var(--primary-dark);box-shadow:inset 3px 0 0 var(--primary)}
+  .nav-ico{width:20px;display:inline-flex;justify-content:center}
+  .side-foot{margin-top:auto;border-top:1px solid var(--divider);padding-top:10px}
+  .main-area{flex:1 1 auto;min-width:0;padding:20px 22px 26px;background:#FCFDFF;border-radius:0 0 var(--radius) 0}
+  .view-title{font-size:19px;font-weight:700;margin:0 0 16px}
+  .paper{background:#fff;border:1px solid var(--divider);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px}
+  .paper.add-paper{padding:18px;margin-bottom:14px}
+  /* 工作计时 */
+  .work-card{max-width:480px;margin:0 auto;text-align:center;padding:26px 20px}
+  .work-label{font-size:12px;color:var(--text2)}
+  .work-title{font-size:16px;font-weight:700;margin-top:6px}
+  .work-time{font-size:44px;font-weight:800;letter-spacing:-1px;margin:18px 0;font-variant-numeric:tabular-nums;color:var(--primary)}
+  .work-card.is-timing .work-time{color:var(--warning)}
+  .work-actions{display:flex;justify-content:center;gap:10px}
+  /* 汇总卡对齐 */
+  .summary-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .seg-group{display:inline-flex;gap:4px;padding:3px;background:#F1F5F9;border:1px solid var(--divider);border-radius:10px}
+  .seg-group button{border:0;background:transparent;color:var(--text2);padding:6px 16px;border-radius:7px;font-size:12px;font-weight:700;transition:.18s}
+  .seg-group button.active{background:#fff;color:var(--primary);box-shadow:0 2px 6px rgba(15,23,42,.10)}
+  .range-text{font-size:11px;color:var(--text2)}
+  .stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:10px}
+  .stat-card{background:#fff;border:1px solid var(--divider);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;text-align:left;min-width:0}
+  .stat-label{font-size:12px;color:var(--text2);font-weight:600}
+  .stat-value{font-size:30px;font-weight:800;line-height:1.2;margin-top:8px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+  .stat-foot{font-size:11px;color:#94A3B8;margin-top:6px}
+  .stat-card.blue .stat-value{color:var(--primary)}
+  .stat-card.green .stat-value{color:var(--success)}
+  .stat-card.orange .stat-value{color:#EA580C}
+  .stat-grid.broken{display:flex;flex-wrap:wrap;gap:16px}
+  .stat-grid.broken .stat-card{flex:1 1 200px;min-width:200px}
+  .stat-grid.broken .stat-card:last-child{flex-basis:100%}
+  .stat-grid.broken .stat-card:last-child .stat-value{font-size:16px;margin-top:0}
+  .stat-grid.broken .stat-card:last-child .stat-foot{display:none}
+  .summary-flag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;background:#DCFCE7;color:#15803D}
+  .summary-flag.is-broken{background:#FEE2E2;color:#B91C1C}
+  .text-btn{border:0;background:transparent;color:var(--primary);font-size:12px;font-weight:600;padding:6px 2px;text-decoration:underline;text-underline-offset:3px}
+  .chart-placeholder{height:110px;border:1px dashed var(--divider);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:12px;background:#fff;margin:14px 0 20px}
+  .sub-title{font-size:14px;font-weight:700;margin:0 0 10px}
+
+  /* ---------- 备注浮层（贴着按钮展开，带指向箭头） ---------- */
+  .note-pop{position:fixed;z-index:1000;width:min(340px,calc(100vw - 20px));background:#fff;border:1px solid var(--divider);border-radius:12px;box-shadow:0 14px 40px rgba(15,23,42,.22);padding:0;animation:pop-in .16s ease;transform-origin:top center}
+  .note-pop::before{content:"";position:absolute;top:-7px;left:var(--arrow-left,30px);width:12px;height:12px;background:#fff;border-left:1px solid var(--divider);border-top:1px solid var(--divider);transform:translateX(-50%) rotate(45deg)}
+  .note-pop.above{transform-origin:bottom center}
+  .note-pop.above::before{top:auto;bottom:-7px;border-left:0;border-top:0;border-right:1px solid var(--divider);border-bottom:1px solid var(--divider)}
+  .note-pop .modal-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--divider)}
+  .note-pop .modal-head b{font-size:13px}
+  .note-pop .modal-head small{color:var(--text2);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+  .note-pop textarea{width:calc(100% - 24px);margin:12px 12px 8px;min-height:92px;border:1px solid var(--divider);border-radius:9px;padding:9px 10px;font-size:12px;color:var(--text);outline:none;background:#FCFDFE;resize:vertical}
+  .note-pop textarea:focus{border-color:var(--primary-light);box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+  .note-pop .modal-foot{padding:0 12px 12px}
+  .note-pop .modal-foot .btn{padding:7px 13px;font-size:12px}
+  /* 富文本备注工具栏 + 编辑区 */
+  .rt-bar{display:flex;align-items:center;gap:3px;flex-wrap:wrap;margin:10px 12px 0;padding:5px 6px;border:1px solid var(--divider);border-radius:8px;background:#F8FAFC}
+  .rt-bar button{min-width:27px;height:26px;padding:0 6px;border:0;background:transparent;border-radius:6px;color:var(--text2);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+  .rt-bar button:hover{background:#E2E8F0;color:var(--text)}
+  .rt-bar .sep{width:1px;height:16px;background:var(--divider);margin:0 3px}
+  .rt-bar button b{font-weight:800}.rt-bar button i{font-style:italic}.rt-bar button u{text-decoration:underline}
+  .rt-editor{min-height:96px;max-height:220px;overflow:auto;margin:8px 12px;padding:9px 11px;border:1px solid var(--divider);border-radius:9px;font-size:12px;line-height:1.7;color:var(--text);background:#FCFDFE;outline:none}
+  .rt-editor:focus{border-color:var(--primary-light);box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+  .rt-editor:empty:before{content:attr(data-ph);color:#94A3B8}
+  .rt-editor ul,.rt-editor ol{margin:4px 0;padding-left:20px}
+  .rt-hint{font-size:10px;color:#94A3B8;margin:0 12px 2px}
+  .backdrop{position:fixed;inset:0;z-index:999;background:rgba(15,23,42,.32)}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+
+  /* ---------- 数据管理弹窗（导出/导入/自动备份） ---------- */
+  .data-modal{position:fixed;z-index:1001;width:min(480px,calc(100vw - 24px));background:#fff;border:1px solid var(--divider);border-radius:16px;box-shadow:0 24px 60px rgba(15,23,42,.3);overflow:hidden;animation:pop-center .2s cubic-bezier(.2,.8,.2,1);left:50%;top:50%;transform:translate(-50%,-50%)}
+  .data-head{display:flex;align-items:center;gap:9px;padding:16px 18px;border-bottom:1px solid var(--divider)}
+  .data-head b{font-size:15px}
+  .data-body{padding:16px 18px;max-height:70vh;overflow:auto}
+  .data-note{background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:11px 13px;font-size:12px;color:#92400E;line-height:1.65;margin-bottom:16px}
+  .data-note code{background:#FEF3C7;border-radius:4px;padding:1px 5px;font-family:Consolas,monospace;font-size:11px;word-break:break-all}
+  .data-group{margin-bottom:16px}
+  .data-group h4{font-size:12px;font-weight:700;color:var(--text);margin:0 0 9px}
+  .data-row{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--divider);border-radius:10px;margin-bottom:8px}
+  .data-row .di{width:34px;height:34px;flex:0 0 34px;border-radius:9px;background:#EFF6FF;color:var(--primary);display:flex;align-items:center;justify-content:center}
+  .data-row .dtxt{flex:1 1 auto;min-width:0}
+  .data-row .dtxt b{display:block;font-size:12px;font-weight:700}
+  .data-row .dtxt small{display:block;color:var(--text2);font-size:11px;margin-top:1px}
+  .data-row .btn{padding:7px 11px;font-size:11px}
+  .switch{width:40px;height:22px;border-radius:999px;background:#CBD5E1;position:relative;transition:.18s;flex:0 0 40px;border:0;padding:0;cursor:pointer}
+  .switch i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.18s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .switch.on{background:var(--primary)}
+  .switch.on i{transform:translateX(18px)}
+
+  /* ---------- 删除二次确认弹窗 ---------- */
+  .confirm-modal{position:fixed;z-index:1100;width:min(400px,calc(100vw - 24px));background:#fff;border:1px solid var(--divider);border-radius:16px;box-shadow:0 24px 60px rgba(15,23,42,.35);left:50%;top:50%;transform:translate(-50%,-50%);overflow:hidden;animation:pop-center .2s cubic-bezier(.2,.8,.2,1)}
+  .confirm-body{padding:24px 22px 6px;text-align:center}
+  .confirm-ic{width:52px;height:52px;border-radius:50%;background:#FEF2F2;color:#DC2626;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+  .confirm-ic .ic{width:26px;height:26px}
+  .confirm-body h3{margin:0 0 8px;font-size:16px;color:var(--text)}
+  .confirm-body p{margin:0;font-size:13px;color:var(--text2);line-height:1.65;word-break:break-all}
+  .confirm-body p b{color:var(--text)}
+  .confirm-foot{display:flex;gap:10px;padding:18px 22px 22px}
+  .confirm-foot .btn{flex:1}
+  .btn-danger{background:#DC2626;color:#fff;box-shadow:0 3px 10px rgba(220,38,38,.22)}
+  .btn-danger:hover{background:#B91C1C}
+  .data-foot{display:flex;justify-content:flex-end;padding:0 18px 16px}
+
+  /* ---------- tooltip / toast ---------- */
+  #ui-tooltip{position:fixed;z-index:1100;pointer-events:none;background:#1E293B;color:#fff;font-size:12px;font-weight:600;padding:6px 10px;border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,.28);opacity:0;transition:opacity .14s;white-space:nowrap;transform:translate(-50%,0)}
+  #ui-tooltip.show{opacity:1}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:#1E293B;color:#fff;font-size:12px;font-weight:600;padding:10px 18px;border-radius:10px;box-shadow:0 8px 26px rgba(15,23,42,.28);opacity:0;pointer-events:none;transition:.25s;z-index:1002;max-width:84vw;text-align:center}
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+
+  @media(max-width:760px){.stat-grid{grid-template-columns:minmax(0,1fr)}.topbar{padding:14px 16px 0}.stage{padding:0 12px}.main-area{padding:16px 14px}.mini-stage{height:auto;display:flex;flex-direction:column;gap:16px}.window{position:relative!important;left:auto!important;top:auto!important;width:100%!important}.resize-handle{display:none}}
+</style>
+</head>
+<body data-mode="mini" data-pinned="false">
+
+<!-- Lucide 内联图标 sprite（ISC 许可，离线可用） -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></symbol>
+  <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+  <symbol id="i-minimize-2" viewBox="0 0 24 24"><path d="m14 10 7-7"/><path d="M20 10h-7V3"/><path d="m3 21 7-7"/><path d="M4 14h6v6"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="i-square" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><path d="M10 2h4"/><path d="M12 14l4-4"/><circle cx="12" cy="14" r="8"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M15 6h6"/><path d="M15 12h6"/><path d="M15 18h6"/><path d="m3 6 2 2 3-3"/><path d="m3 12 2 2 3-3"/><path d="m3 18 2 2 3-3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <!-- 删除（Lucide trash-2） -->
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+  <!-- 危险提示（Lucide triangle-alert） -->
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand-block">
+      <div class="logo">SF</div>
+      <div>
+        <div class="brand-title">Schedule Flow · UI 改动预览 v3</div>
+        <div class="notice">改动预览原型 · 非最终程序 · 单文件离线 · 悬停按钮看文字提示</div>
+      </div>
+    </div>
+    <div class="top-controls">
+      <div class="reopen-group" id="reopenGroup"></div>
+      <div class="mode-seg" aria-label="展示模式切换">
+        <button data-action="mode" data-mode="mini">极简模式</button>
+        <button data-action="mode" data-mode="standard">标准模式</button>
+        <button data-action="mode" data-mode="compare">并排对比</button>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><kbd>1</kbd>两个小窗可拖标题栏移动、右下角缩放、✕ 关闭后从上方重开</span>
+    <span><kbd>2</kbd>图标统一 Lucide 线性风格 · 置顶用柔和蓝色区分</span>
+    <span><kbd>3</kbd>番茄钟设置移到右上角 · TODO 备注改为弹窗编辑</span>
+  </div>
+</header>
+
+<main class="stage">
+  <div class="mini-stage" id="miniStage">
+
+    <!-- ===== 小窗 1：番茄钟（可拖动 / 缩放 / 关闭） ===== -->
+    <section class="window mini-window mini-pomo-window" id="pomoWin" style="left:16px;top:10px;width:392px" aria-label="番茄钟小窗">
+      <div class="window-titlebar" data-drag-handle>
+        <div class="win-dots"><i></i><i></i><i></i></div>
+        <span class="win-name">番茄钟</span>
+        <div class="titlebar-spacer"></div>
+        <button class="tb-btn pin-btn" data-action="pin" data-pin aria-pressed="false" data-tip="点击开启始终置顶">
+          <svg class="ic"><use href="#i-pin"/></svg>
+        </button>
+        <button class="tb-btn mode-tb" data-action="mode" data-mode="standard" data-tip="切换到标准模式（完整四视图）">
+          <svg class="ic"><use href="#i-layout"/></svg>
+        </button>
+        <button class="tb-btn close-btn" data-action="close-win" data-win="pomo" data-tip="关闭番茄钟小窗">
+          <svg class="ic"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="mini-body">
+        <div class="pomo-card" data-pomodoro>
+          <!-- 设置按钮：卡片右上角 -->
+          <button class="pomo-cfg" data-action="pomo-config" data-tip="设置轮次与时间" aria-expanded="false">
+            <svg class="ic"><use href="#i-settings"/></svg>
+          </button>
+          <div class="pomo-ring">
+            <svg class="ring-svg" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="ring-track" cx="60" cy="60" r="52"></circle>
+              <circle class="ring-bar" data-ring cx="60" cy="60" r="52"></circle>
+            </svg>
+            <div class="ring-center">
+              <div class="ring-time" data-pomo-time>22:43</div>
+              <div class="ring-phase" data-pomo-phase>专注 · 第 2/4 轮</div>
+            </div>
+          </div>
+          <div class="pomo-actions">
+            <button class="ico-btn primary" data-action="pomo-toggle" data-tip="开始 / 暂停"><svg class="ic"><use href="#i-play"/></svg></button>
+            <button class="ico-btn ghost" data-action="pomo-reset" data-tip="重置"><svg class="ic"><use href="#i-reset"/></svg></button>
+          </div>
+          <div class="pomo-settings hidden" data-pomo-settings>
+            <div class="cfg-row"><span>工作时长</span>
+              <span class="stepper"><button data-action="cfg-step" data-field="work" data-delta="-1">−</button><b data-cfg="work">25</b><button data-action="cfg-step" data-field="work" data-delta="1">+</button></span>
+              <span class="cfg-unit">分钟</span></div>
+            <div class="cfg-row"><span>休息时长</span>
+              <span class="stepper"><button data-action="cfg-step" data-field="rest" data-delta="-1">−</button><b data-cfg="rest">5</b><button data-action="cfg-step" data-field="rest" data-delta="1">+</button></span>
+              <span class="cfg-unit">分钟</span></div>
+            <div class="cfg-row"><span>轮次数</span>
+              <span class="stepper"><button data-action="cfg-step" data-field="rounds" data-delta="-1">−</button><b data-cfg="rounds">4</b><button data-action="cfg-step" data-field="rounds" data-delta="1">+</button></span>
+              <span class="cfg-unit">轮</span></div>
+            <button class="btn btn-primary cfg-apply" data-action="cfg-apply">应用设置</button>
+          </div>
+          <div class="pomo-tip" data-pomo-tip-text>专注 25 分钟 · 短休 5 分钟 · 共 4 轮</div>
+        </div>
+      </div>
+      <div class="resize-handle" data-resize aria-hidden="true"></div>
+    </section>
+
+    <!-- ===== 小窗 2：TODO（可拖动 / 缩放 / 关闭） ===== -->
+    <section class="window mini-window mini-todo-window" id="todoWin" style="left:430px;top:10px;width:392px" aria-label="TODO 小窗">
+      <div class="window-titlebar" data-drag-handle>
+        <div class="win-dots"><i></i><i></i><i></i></div>
+        <span class="win-name">TODO</span>
+        <div class="titlebar-spacer"></div>
+        <button class="tb-btn pin-btn" data-action="pin" data-pin aria-pressed="false" data-tip="点击开启始终置顶">
+          <svg class="ic"><use href="#i-pin"/></svg>
+        </button>
+        <button class="tb-btn mode-tb" data-action="mode" data-mode="standard" data-tip="切换到标准模式（完整四视图）">
+          <svg class="ic"><use href="#i-layout"/></svg>
+        </button>
+        <button class="tb-btn close-btn" data-action="close-win" data-win="todo" data-tip="关闭 TODO 小窗">
+          <svg class="ic"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="mini-body">
+        <div class="add-area">
+          <div class="add-row">
+            <input class="add-input" data-add-input placeholder="输入待办工作标题后回车" aria-label="新建工作项">
+            <button class="add-ico" data-action="add" data-tip="添加工作项"><svg class="ic"><use href="#i-plus"/></svg></button>
+          </div>
+        </div>
+        <div>
+          <div class="section-head"><span class="change-tag">C</span><span class="section-title">TODO 清单</span></div>
+          <div class="todo-list" data-todo-list></div>
+        </div>
+      </div>
+      <div class="resize-handle" data-resize aria-hidden="true"></div>
+    </section>
+
+  </div>
+
+  <!-- ===== 标准模式窗口 ===== -->
+  <section class="std-window" id="stdWindow" aria-label="标准模式窗口">
+    <div class="window-titlebar">
+      <div class="win-dots"><i></i><i></i><i></i></div>
+      <span class="win-name">Schedule Flow · 标准</span>
+      <div class="titlebar-spacer"></div>
+      <button class="tb-btn pin-btn" data-action="pin" data-pin aria-pressed="false" data-tip="点击开启始终置顶">
+        <svg class="ic"><use href="#i-pin"/></svg>
+      </button>
+      <button class="tb-btn mode-tb" data-action="mode" data-mode="mini" data-tip="切换到极简模式（两个独立小窗）">
+        <svg class="ic"><use href="#i-minimize-2"/></svg>
+      </button>
+    </div>
+    <div class="std-layout">
+      <aside class="sidebar">
+        <div class="side-brand"><b>Schedule Flow</b><small>专注 · 记录 · 复盘</small></div>
+        <button class="nav-btn" data-action="nav" data-nav="pomodoro"><span class="nav-ico"><svg class="ic"><use href="#i-timer"/></svg></span>番茄钟</button>
+        <button class="nav-btn active" data-action="nav" data-nav="todo"><span class="nav-ico"><svg class="ic"><use href="#i-list"/></svg></span>TODO</button>
+        <button class="nav-btn" data-action="nav" data-nav="worktimer"><span class="nav-ico"><svg class="ic"><use href="#i-play"/></svg></span>工作计时</button>
+        <button class="nav-btn" data-action="nav" data-nav="summary"><span class="nav-ico"><svg class="ic"><use href="#i-chart"/></svg></span>汇总</button>
+        <div class="side-foot">
+          <button class="nav-btn" data-action="settings"><span class="nav-ico"><svg class="ic"><use href="#i-settings"/></svg></span>设置</button>
+        </div>
+      </aside>
+      <main class="main-area">
+        <h2 class="view-title" data-view-title>TODO 清单</h2>
+
+        <!-- 番茄钟 -->
+        <div data-view="pomodoro" class="hidden">
+          <div class="view-pomodoro-wrap">
+            <div class="pomo-card" data-pomodoro>
+              <button class="pomo-cfg" data-action="pomo-config" data-tip="设置轮次与时间" aria-expanded="false"><svg class="ic"><use href="#i-settings"/></svg></button>
+              <div class="pomo-ring">
+                <svg class="ring-svg" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-track" cx="60" cy="60" r="52"></circle><circle class="ring-bar" data-ring cx="60" cy="60" r="52"></circle></svg>
+                <div class="ring-center"><div class="ring-time" data-pomo-time>22:43</div><div class="ring-phase" data-pomo-phase>专注 · 第 2/4 轮</div></div>
+              </div>
+              <div class="pomo-actions">
+                <button class="btn btn-pomo" data-action="pomo-toggle" data-tip="开始 / 暂停"><svg class="ic"><use href="#i-play"/></svg><span>开始</span></button>
+                <button class="btn btn-ghost" data-action="pomo-reset" data-tip="重置"><svg class="ic"><use href="#i-reset"/></svg><span>重置</span></button>
+              </div>
+              <div class="pomo-settings hidden" data-pomo-settings>
+                <div class="cfg-row"><span>工作时长</span><span class="stepper"><button data-action="cfg-step" data-field="work" data-delta="-1">−</button><b data-cfg="work">25</b><button data-action="cfg-step" data-field="work" data-delta="1">+</button></span><span class="cfg-unit">分钟</span></div>
+                <div class="cfg-row"><span>休息时长</span><span class="stepper"><button data-action="cfg-step" data-field="rest" data-delta="-1">−</button><b data-cfg="rest">5</b><button data-action="cfg-step" data-field="rest" data-delta="1">+</button></span><span class="cfg-unit">分钟</span></div>
+                <div class="cfg-row"><span>轮次数</span><span class="stepper"><button data-action="cfg-step" data-field="rounds" data-delta="-1">−</button><b data-cfg="rounds">4</b><button data-action="cfg-step" data-field="rounds" data-delta="1">+</button></span><span class="cfg-unit">轮</span></div>
+                <button class="btn btn-primary cfg-apply" data-action="cfg-apply">应用设置</button>
+              </div>
+              <div class="pomo-tip" data-pomo-tip-text>专注 25 分钟 · 短休 5 分钟 · 共 4 轮</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TODO -->
+        <div data-view="todo">
+          <div class="paper add-paper add-area">
+            <div class="add-row">
+              <input class="add-input" data-add-input placeholder="输入待办工作标题后回车" aria-label="新建工作项">
+              <button class="add-btn" data-action="add" data-tip="添加工作项"><svg class="ic"><use href="#i-plus"/></svg>添加</button>
+            </div>
+          </div>
+          <div class="std-todo-list todo-list" data-todo-list></div>
+        </div>
+
+        <!-- 工作计时 -->
+        <div data-view="worktimer" class="hidden">
+          <div class="paper work-card" data-work-card data-id="">
+            <div class="work-label">当前工作项（与 TODO 行内计时共用状态）</div>
+            <div class="work-title" data-worktitle>尚未选择工作项</div>
+            <div class="work-time" data-worktime>00:00</div>
+            <div class="work-actions">
+              <button class="btn btn-primary" data-action="timer-toggle" data-tip="开始 / 暂停"><svg class="ic"><use href="#i-play"/></svg><span>开始 / 暂停</span></button>
+              <button class="btn btn-ghost" data-action="timer-stop" data-tip="停止并结算"><svg class="ic"><use href="#i-square"/></svg><span>停止结算</span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 汇总 -->
+        <div data-view="summary" class="hidden">
+          <div class="summary-toolbar">
+            <div class="seg-group" aria-label="汇总粒度切换">
+              <button data-action="gran" data-gran="day">天</button><button data-action="gran" data-gran="week">周</button><button data-action="gran" data-gran="month">月</button><button data-action="gran" data-gran="year">年</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="range-text" data-range>2026-11-19 · 09:00 ~ 18:00</span>
+              <span class="summary-flag" data-summary-flag>修复后 · 等宽同排</span>
+            </div>
+          </div>
+          <div class="section-head"><span class="change-tag">D</span><span class="section-title">核心指标</span></div>
+          <div class="stat-grid" data-stat-grid></div>
+          <button class="text-btn" data-action="toggle-broken" data-broken-label>查看修复前（问题复现）</button>
+          <div class="chart-placeholder">图表区（P2）：趋势图与时间分布图将在后续迭代加入</div>
+          <h3 class="sub-title">工作明细</h3>
+          <div class="paper" style="text-align:center;color:var(--text2)">当前周期归档的工作项（原型略）</div>
+        </div>
+      </main>
+    </div>
+  </section>
+</main>
+
+<!-- 备注浮层（贴着备注按钮展开） -->
+<div class="backdrop hidden" id="noteBackdrop"></div>
+<div class="note-pop hidden" id="notePop" role="dialog" aria-label="备注 / 心得">
+    <div class="modal-head">
+      <svg class="ic"><use href="#i-note"/></svg>
+      <b>备注 / 心得</b>
+      <small data-notes-title></small>
+      <div class="titlebar-spacer" style="flex:1"></div>
+      <button class="tb-btn" data-action="notes-close" data-tip="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="rt-bar" data-rt-bar>
+      <button type="button" data-rt="bold" title="加粗"><b>B</b></button>
+      <button type="button" data-rt="italic" title="斜体"><i>I</i></button>
+      <button type="button" data-rt="underline" title="下划线"><u>U</u></button>
+      <span class="sep"></span>
+      <button type="button" data-rt="insertUnorderedList" title="无序列表">≡</button>
+      <button type="button" data-rt="insertOrderedList" title="有序列表">1.</button>
+      <span class="sep"></span>
+      <button type="button" data-rt="formatBlock" data-rt-val="H3" title="小标题">H</button>
+      <button type="button" data-rt="removeFormat" title="清除格式">⌫</button>
+    </div>
+    <div class="rt-editor" id="notesInput" contenteditable="true" data-ph="记录工作方法、问题与心得，支持加粗/列表等格式…"></div>
+    <div class="rt-hint">支持富文本：选中文字后点上方工具栏设置格式</div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-action="notes-close">取消</button>
+      <button class="btn btn-primary" data-action="notes-save">保存</button>
+    </div>
+</div>
+
+<div class="backdrop hidden" id="dataBackdrop"></div>
+<div class="data-modal hidden" id="dataModal" role="dialog" aria-label="数据管理">
+  <div class="data-head">
+    <svg class="ic lg"><use href="#i-settings"/></svg>
+    <b>数据管理</b>
+    <div class="titlebar-spacer" style="flex:1"></div>
+    <button class="tb-btn" data-action="data-close" data-tip="关闭"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="data-body">
+    <div class="data-note">
+      所有记录保存在本机用户目录：<code>C:\Users\&lt;你&gt;\AppData\Roaming\Schedule Flow\config.json</code><br>
+      安装在系统盘之外，<b>软件更新 / 重新安装不会丢失</b>；换电脑需手动迁移该文件。建议定期导出备份。
+    </div>
+    <div class="data-group">
+      <h4>备份与迁移</h4>
+      <div class="data-row">
+        <div class="di"><svg class="ic"><use href="#i-plus"/></svg></div>
+        <div class="dtxt"><b>导出备份</b><small>把所有 TODO、用时、番茄记录、设置导出为 JSON 文件</small></div>
+        <button class="btn btn-primary" data-action="data-export">导出</button>
+      </div>
+      <div class="data-row">
+        <div class="di"><svg class="ic"><use href="#i-note"/></svg></div>
+        <div class="dtxt"><b>导入恢复</b><small>从之前导出的 JSON 文件恢复（会覆盖当前数据）</small></div>
+        <button class="btn btn-ghost" data-action="data-import">导入</button>
+        <input type="file" id="importFile" accept="application/json,.json" class="hidden">
+      </div>
+    </div>
+    <div class="data-group">
+      <h4>自动化</h4>
+      <div class="data-row">
+        <div class="di"><svg class="ic"><use href="#i-reset"/></svg></div>
+        <div class="dtxt"><b>自动备份</b><small>每次退出程序时自动保留一份带日期的副本</small></div>
+        <button class="switch" id="autoBackupSwitch" data-action="auto-backup" aria-pressed="false" aria-label="自动备份开关"><i></i></button>
+      </div>
+    </div>
+  </div>
+  <div class="data-foot"><button class="btn btn-ghost" data-action="data-close">关闭</button></div>
+</div>
+
+<!-- 删除二次确认（危险操作，明示后果） -->
+<div class="backdrop hidden" id="confirmBackdrop" style="z-index:1099"></div>
+<div class="confirm-modal hidden" id="confirmModal" role="alertdialog" aria-modal="true" aria-label="删除确认">
+  <div class="confirm-body">
+    <div class="confirm-ic"><svg class="ic"><use href="#i-alert"/></svg></div>
+    <h3>确认删除这条工作项？</h3>
+    <p>即将删除「<b data-confirm-name></b>」。<br>该项的计时记录与备注会一并移除，且无法撤销。</p>
+  </div>
+  <div class="confirm-foot">
+    <button class="btn btn-ghost" data-action="cancel-delete">取消</button>
+    <button class="btn btn-danger" data-action="confirm-delete">确认删除</button>
+  </div>
+</div>
+
+<div id="ui-tooltip" role="tooltip"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  'use strict';
+
+  var STATE={
+    mode:'mini', alwaysOnTop:false, activeView:'todo', granularity:'day', brokenSummary:false,
+    toastTimer:null, nextId:4, activeTodoId:null, configOpen:false,
+    windows:{pomo:true,todo:true}, notesTodoId:null, deleteId:null, autoBackup:true,
+    pomodoroConfig:{work:25,rest:5,rounds:4},
+    pomodoro:{phase:'focus',round:2,totalSec:25*60,remainingSec:22*60+43,running:false},
+    todos:[
+      {id:1,title:'整理本周需求清单',completed:false,accumulatedSec:42*60+18,status:'idle',notes:'把三份需求文档的关键结论汇总到一页。'},
+      {id:2,title:'完成接口联调文档',completed:false,accumulatedSec:12*60+5,status:'idle',notes:'重点补充异常码与重试策略。'},
+      {id:3,title:'复盘上周番茄钟数据',completed:true,accumulatedSec:3600+6*60,status:'idle',notes:'专注时段主要集中在上午。'}
+    ]
+  };
+  var SUMMARY_DATA={
+    day:{completed:3,work:'3 小时 12 分',pomodoros:8,range:'2026-11-19 · 09:00 ~ 18:00'},
+    week:{completed:14,work:'16 小时 40 分',pomodoros:32,range:'2026 第 47 周 · 11-16 ~ 11-22'},
+    month:{completed:58,work:'72 小时 05 分',pomodoros:126,range:'2026-11 · 11-01 ~ 11-30'},
+    year:{completed:612,work:'826 小时 30 分',pomodoros:1480,range:'2026 · 01-01 ~ 12-31'}
+  };
+  var VIEW_TITLES={pomodoro:'番茄钟',todo:'TODO 清单',worktimer:'工作计时',summary:'工作汇总'};
+  var STATUS_LABEL={idle:'未开始',running:'计时中',paused:'已暂停'};
+  var RING_CIRCUMFERENCE=2*Math.PI*52;
+
+  function pad(n){return String(n).padStart(2,'0');}
+  function clock(totalSec){var s=Math.max(0,Math.floor(totalSec)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return h>0?pad(h)+':'+pad(m)+':'+pad(sec):pad(m)+':'+pad(sec);}
+  function human(totalSec){var s=Math.max(0,Math.floor(totalSec)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;if(h>0)return h+' 小时 '+m+' 分';if(m>0)return m+' 分 '+sec+' 秒';return sec+' 秒';}
+  function escapeHtml(v){return String(v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function findTodo(id){for(var i=0;i<STATE.todos.length;i++){if(STATE.todos[i].id===id)return STATE.todos[i];}return null;}
+  function ico(name,cls){return '<svg class="ic '+(cls||'')+'"><use href="#i-'+name+'"/></svg>';}
+  function setIcon(btn,name){var u=btn&&btn.querySelector('use');if(u)u.setAttribute('href','#i-'+name);}
+  function toast(msg){var b=document.getElementById('toast');b.textContent=msg;b.classList.add('show');window.clearTimeout(STATE.toastTimer);STATE.toastTimer=window.setTimeout(function(){b.classList.remove('show');},1900);}
+
+  /* tooltip */
+  var tooltipEl=document.getElementById('ui-tooltip');
+  document.addEventListener('mouseover',function(e){var t=e.target.closest&&e.target.closest('[data-tip]');if(!t)return;tooltipEl.textContent=t.getAttribute('data-tip');var r=t.getBoundingClientRect();tooltipEl.style.left=Math.max(90,Math.min(window.innerWidth-90,r.left+r.width/2))+'px';tooltipEl.style.top=(r.bottom+8)+'px';tooltipEl.classList.add('show');});
+  document.addEventListener('mouseout',function(e){var t=e.target.closest&&e.target.closest('[data-tip]');if(t)tooltipEl.classList.remove('show');});
+
+  /* ---------- 渲染 ---------- */
+  function renderMode(){
+    document.body.setAttribute('data-mode',STATE.mode);
+    document.body.setAttribute('data-pinned',STATE.alwaysOnTop?'true':'false');
+    var bs=document.querySelectorAll('.mode-seg [data-action="mode"]');
+    for(var i=0;i<bs.length;i++)bs[i].classList.toggle('active',bs[i].getAttribute('data-mode')===STATE.mode);
+    var pins=document.querySelectorAll('[data-pin]');
+    for(var j=0;j<pins.length;j++){
+      pins[j].classList.toggle('active',STATE.alwaysOnTop);
+      pins[j].setAttribute('aria-pressed',STATE.alwaysOnTop?'true':'false');
+      pins[j].setAttribute('data-tip',STATE.alwaysOnTop?'已置顶 · 点击取消':'点击开启始终置顶');
+    }
+    renderReopen();
+  }
+  function renderReopen(){
+    var g=document.getElementById('reopenGroup');var html='';
+    if(!STATE.windows.pomo)html+='<button class="reopen-btn" data-action="reopen" data-win="pomo">'+ico('plus','sm')+'番茄钟窗</button>';
+    if(!STATE.windows.todo)html+='<button class="reopen-btn" data-action="reopen" data-win="todo">'+ico('plus','sm')+'TODO 窗</button>';
+    if(html)html='<span class="reopen-label">重新打开：</span>'+html;
+    g.innerHTML=html;
+  }
+  function renderViews(){
+    var vs=document.querySelectorAll('[data-view]');
+    for(var i=0;i<vs.length;i++)vs[i].classList.toggle('hidden',vs[i].getAttribute('data-view')!==STATE.activeView);
+    var ns=document.querySelectorAll('[data-nav]');
+    for(var j=0;j<ns.length;j++)ns[j].classList.toggle('active',ns[j].getAttribute('data-nav')===STATE.activeView);
+    var ts=document.querySelectorAll('[data-view-title]');
+    for(var k=0;k<ts.length;k++)ts[k].textContent=VIEW_TITLES[STATE.activeView];
+  }
+  function renderPomodoro(){
+    var p=STATE.pomodoro,ratio=Math.min(1,Math.max(0,(p.totalSec-p.remainingSec)/p.totalSec));
+    var ws=document.querySelectorAll('[data-pomodoro]');
+    for(var i=0;i<ws.length;i++){
+      var w=ws[i];
+      w.querySelector('[data-pomo-time]').textContent=clock(p.remainingSec);
+      w.querySelector('[data-pomo-phase]').textContent=(p.phase==='focus'?'专注':'短休息')+' · 第 '+p.round+'/'+STATE.pomodoroConfig.rounds+' 轮';
+      var ring=w.querySelector('[data-ring]');ring.style.strokeDasharray=RING_CIRCUMFERENCE.toFixed(2);ring.style.strokeDashoffset=(RING_CIRCUMFERENCE*(1-ratio)).toFixed(2);ring.classList.toggle('is-break',p.phase==='break');
+      var toggle=w.querySelector('[data-action="pomo-toggle"]');setIcon(toggle,p.running?'pause':'play');toggle.classList.toggle('running',p.running);toggle.setAttribute('data-tip',p.running?'暂停':'开始');
+      var lbl=toggle.querySelector('span');if(lbl)lbl.textContent=p.running?'暂停':'开始';
+      w.classList.toggle('is-running',p.running);
+      var panel=w.querySelector('[data-pomo-settings]');if(panel)panel.classList.toggle('hidden',!STATE.configOpen);
+      var cfg=w.querySelector('[data-action="pomo-config"]');if(cfg){cfg.classList.toggle('active',STATE.configOpen);cfg.setAttribute('aria-expanded',STATE.configOpen?'true':'false');}
+      var tip=w.querySelector('[data-pomo-tip-text]');if(tip)tip.textContent=currentTipText();
+    }
+    renderConfigValues();
+  }
+  function currentTipText(){var c=STATE.pomodoroConfig;return '专注 '+c.work+' 分钟 · 短休 '+c.rest+' 分钟 · 共 '+c.rounds+' 轮';}
+  function renderConfigValues(){var f=['work','rest','rounds'],ns=document.querySelectorAll('[data-cfg]');for(var i=0;i<ns.length;i++){var k=ns[i].getAttribute('data-cfg');if(f.indexOf(k)>=0)ns[i].textContent=STATE.pomodoroConfig[k];}}
+
+  function todoRowHtml(t){
+    var glyph=t.status==='running'?'pause':(t.status==='paused'?'play':'play');
+    var tip=t.status==='running'?'暂停':(t.status==='paused'?'继续':'开始计时');
+    var rc='todo-row'+(t.status==='running'?' is-timing':'')+(t.completed?' is-done':'');
+    var tc='btn-timer '+(t.status==='running'?'running':t.status==='paused'?'paused':'idle');
+    return ''+
+      '<div class="'+rc+'" data-id="'+t.id+'">'+
+        '<div class="todo-line">'+
+          '<label class="cb" data-tip="标记完成"><input type="checkbox" data-action="toggle-todo"'+(t.completed?' checked':'')+'><span class="cb-face">'+ico('check')+'</span></label>'+
+          '<div class="todo-copy"><div class="todo-title">'+escapeHtml(t.title)+'</div><div class="todo-meta">累计用时 '+human(t.accumulatedSec)+'</div></div>'+
+          '<div class="todo-ops">'+
+            '<span class="chip chip-status '+t.status+'">'+STATUS_LABEL[t.status]+'</span>'+
+            '<span class="chip chip-time">'+clock(t.accumulatedSec)+'</span>'+
+            '<button class="btn-timer '+tc.split(' ')[1]+'" data-action="timer-toggle" data-tip="'+tip+'">'+ico(glyph,'sm')+'</button>'+
+            '<button class="note-btn'+(t.notes?' has-note':'')+'" data-action="notes" data-tip="查看/编辑备注与心得">'+ico('note','sm')+'</button>'+
+            '<button class="del-btn" data-action="delete-todo" data-tip="删除这条工作项">'+ico('trash','sm')+'</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+  }
+  function renderTodos(){
+    var ls=document.querySelectorAll('[data-todo-list]');
+    for(var i=0;i<ls.length;i++)ls[i].innerHTML=STATE.todos.length?STATE.todos.map(todoRowHtml).join(''):'<div class="empty-state">还没有工作项，先在上方添加一条吧。</div>';
+    renderWorkTimer();
+  }
+  function renderWorkTimer(){
+    var a=STATE.activeTodoId?findTodo(STATE.activeTodoId):null,cs=document.querySelectorAll('[data-work-card]');
+    for(var i=0;i<cs.length;i++){var c=cs[i];c.setAttribute('data-id',a?String(a.id):'');c.querySelector('[data-worktitle]').textContent=a?a.title:'尚未选择工作项';c.querySelector('[data-worktime]').textContent=a?clock(a.accumulatedSec):'00:00';c.classList.toggle('is-timing',!!a&&a.status==='running');}
+  }
+  function renderSummary(){
+    var d=SUMMARY_DATA[STATE.granularity],gs=document.querySelectorAll('[data-gran]');
+    for(var i=0;i<gs.length;i++)gs[i].classList.toggle('active',gs[i].getAttribute('data-gran')===STATE.granularity);
+    var grids=document.querySelectorAll('[data-stat-grid]');
+    for(var j=0;j<grids.length;j++){var g=grids[j];g.classList.toggle('broken',STATE.brokenSummary);g.innerHTML=''+
+      '<div class="stat-card blue"><div class="stat-label">完成任务数</div><div class="stat-value">'+d.completed+'</div><div class="stat-foot">较上期 +3</div></div>'+
+      '<div class="stat-card green"><div class="stat-label">累计工作用时</div><div class="stat-value">'+d.work+'</div><div class="stat-foot">较上期 +2 小时</div></div>'+
+      '<div class="stat-card orange"><div class="stat-label">完成番茄数</div><div class="stat-value">'+d.pomodoros+'</div><div class="stat-foot">较上期 +6</div></div>';}
+    var rs=document.querySelectorAll('[data-range]');for(var k=0;k<rs.length;k++)rs[k].textContent=d.range;
+    var fl=document.querySelectorAll('[data-summary-flag]');for(var m=0;m<fl.length;m++){fl[m].classList.toggle('is-broken',STATE.brokenSummary);fl[m].textContent=STATE.brokenSummary?'修复前 · 问题复现':'修复后 · 等宽同排';}
+    var bl=document.querySelectorAll('[data-broken-label]');for(var n=0;n<bl.length;n++)bl[n].textContent=STATE.brokenSummary?'↩ 返回修复后（等宽同排）':'查看修复前（问题复现）';
+  }
+  function tickTimes(){
+    var rows=document.querySelectorAll('[data-todo-list] .todo-row');
+    for(var i=0;i<rows.length;i++){var t=findTodo(Number(rows[i].getAttribute('data-id')));if(!t)continue;var c=rows[i].querySelector('.chip-time');if(c)c.textContent=clock(t.accumulatedSec);var m=rows[i].querySelector('.todo-meta');if(m)m.textContent='累计用时 '+human(t.accumulatedSec);}
+    var ws=document.querySelectorAll('[data-worktime]'),a=STATE.activeTodoId?findTodo(STATE.activeTodoId):null;
+    for(var j=0;j<ws.length;j++)ws[j].textContent=a?clock(a.accumulatedSec):'00:00';
+    renderPomodoro();
+  }
+
+  /* ---------- 行为 ---------- */
+  function addTodoFrom(input){
+    var v=input.value.trim();if(!v){toast('请先输入工作项标题');input.focus();return;}
+    STATE.todos.unshift({id:STATE.nextId++,title:v,completed:false,accumulatedSec:0,status:'idle',notes:''});
+    var ins=document.querySelectorAll('[data-add-input]');for(var i=0;i<ins.length;i++)ins[i].value='';
+    renderTodos();toast('已添加：'+v);input.focus();
+  }
+  function handleTimerToggle(host){
+    var id=Number(host?host.getAttribute('data-id'):0),t=findTodo(id);
+    if(!t){toast('请先在 TODO 列表添加工作项');return;}
+    if(t.status==='idle'||t.status==='paused'){
+      STATE.todos.forEach(function(x){if(x.status==='running')x.status='paused';});
+      var verb=t.status==='paused'?'继续':'开始';t.status='running';STATE.activeTodoId=t.id;toast('▶ 已'+verb+'计时：'+t.title);
+    }else{t.status='paused';toast('⏸ 已暂停：'+t.title);}
+    renderTodos();
+  }
+  function openNotes(btn){
+    var row=btn.closest('[data-id]');if(!row)return;
+    var t=findTodo(Number(row.getAttribute('data-id')));if(!t)return;
+    STATE.notesTodoId=t.id;
+    document.querySelector('[data-notes-title]').textContent=t.title;
+    document.getElementById('notesInput').innerHTML=t.notes||'';
+    var pop=document.getElementById('notePop'),back=document.getElementById('noteBackdrop');
+    back.classList.remove('hidden');pop.classList.remove('hidden');
+    // 锚定到备注按钮：先显示以获得实际尺寸，再计算位置
+    var r=btn.getBoundingClientRect(),pw=pop.offsetWidth,ph=pop.offsetHeight;
+    var left=r.left+r.width/2-pw/2;
+    left=Math.max(8,Math.min(left,window.innerWidth-pw-8));
+    var arrow=r.left+r.width/2-left;
+    arrow=Math.max(16,Math.min(arrow,pw-16));
+    var above=false,top=r.bottom+9;
+    if(top+ph>window.innerHeight-8 && r.top-ph-9>8){top=r.top-ph-9;above=true;}
+    pop.style.left=left+'px';pop.style.top=top+'px';
+    pop.style.setProperty('--arrow-left',arrow+'px');
+    pop.classList.toggle('above',above);
+    document.getElementById('notesInput').focus();
+  }
+  function closeNotes(){
+    document.getElementById('notePop').classList.add('hidden');
+    document.getElementById('noteBackdrop').classList.add('hidden');
+    STATE.notesTodoId=null;
+  }
+
+  /* 富文本工具栏：选中文字后套用格式 */
+  var rtBar=document.querySelector('[data-rt-bar]');
+  if(rtBar)rtBar.addEventListener('mousedown',function(e){
+    var b=e.target.closest('[data-rt]');if(!b)return;
+    e.preventDefault(); // 防止失焦丢失选区
+    document.getElementById('notesInput').focus();
+    var cmd=b.getAttribute('data-rt'),val=b.getAttribute('data-rt-val');
+    try{document.execCommand(cmd,false,val||null);}catch(err){}
+  });
+
+  /* 数据管理弹窗 */
+  function openDataModal(){
+    document.getElementById('dataBackdrop').classList.remove('hidden');
+    document.getElementById('dataModal').classList.remove('hidden');
+    renderAutoBackup();
+  }
+  function closeDataModal(){
+    document.getElementById('dataBackdrop').classList.add('hidden');
+    document.getElementById('dataModal').classList.add('hidden');
+  }
+
+  /* 删除二次确认：先问再删，避免误触丢数据 */
+  function openDeleteConfirm(id){
+    var t=findTodo(id);if(!t)return;
+    STATE.deleteId=id;
+    document.querySelector('[data-confirm-name]').textContent=t.title;
+    document.getElementById('confirmBackdrop').classList.remove('hidden');
+    document.getElementById('confirmModal').classList.remove('hidden');
+  }
+  function closeDeleteConfirm(){
+    document.getElementById('confirmBackdrop').classList.add('hidden');
+    document.getElementById('confirmModal').classList.add('hidden');
+    STATE.deleteId=null;
+  }
+  function confirmDelete(){
+    var id=STATE.deleteId,t=findTodo(id);
+    if(t){
+      if(STATE.activeTodoId===id)STATE.activeTodoId=null;   // 删的正是计时中项 → 清当前计时
+      if(STATE.notesTodoId===id)closeNotes();               // 备注浮层开着 → 一并关掉
+      STATE.todos=STATE.todos.filter(function(x){return x.id!==id;});
+      renderTodos();
+      toast('已删除：'+t.title);
+    }
+    closeDeleteConfirm();
+  }
+  function renderAutoBackup(){
+    var s=document.getElementById('autoBackupSwitch');if(!s)return;
+    s.classList.toggle('on',!!STATE.autoBackup);
+    s.setAttribute('aria-pressed',STATE.autoBackup?'true':'false');
+  }
+  function exportData(){
+    var payload={version:1,exportedAt:new Date().toISOString(),todos:STATE.todos,pomodoroConfig:STATE.pomodoroConfig,autoBackup:STATE.autoBackup};
+    var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='schedule-flow-backup-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+    toast('已导出备份文件（含 '+STATE.todos.length+' 个工作项）');
+  }
+  function importData(file){
+    if(!file)return;var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var d=JSON.parse(reader.result);
+        if(!Array.isArray(d.todos))throw new Error('格式不正确');
+        STATE.todos=d.todos;STATE.nextId=d.todos.reduce(function(m,x){return Math.max(m,Number(x.id)||0);},0)+1;
+        if(d.pomodoroConfig)STATE.pomodoroConfig=d.pomodoroConfig;
+        if(typeof d.autoBackup==='boolean')STATE.autoBackup=d.autoBackup;
+        renderTodos();renderPomodoro();renderAutoBackup();
+        toast('已导入 '+STATE.todos.length+' 个工作项（覆盖当前数据）');
+      }catch(err){toast('导入失败：文件不是有效的备份 JSON');}
+    };
+    reader.readAsText(file);
+  }
+  document.getElementById('importFile').addEventListener('change',function(e){importData(e.target.files[0]);e.target.value='';});
+
+  /* 窗口拖动 / 缩放 */
+  function bindWindow(win){
+    var bar=win.querySelector('[data-drag-handle]'),handle=win.querySelector('[data-resize]');
+    if(bar)bar.addEventListener('mousedown',function(e){
+      if(e.target.closest('button')||e.target.closest('.win-dots'))return;
+      e.preventDefault();
+      var sx=e.clientX,sy=e.clientY,l=parseFloat(win.style.left)||0,t=parseFloat(win.style.top)||0,stage=win.parentElement.getBoundingClientRect();
+      win.classList.add('is-moving');
+      function move(ev){win.style.left=Math.max(0,Math.min(l+ev.clientX-sx,stage.width-80))+'px';win.style.top=Math.max(0,Math.min(t+ev.clientY-sy,660-60))+'px';}
+      function up(){document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);win.classList.remove('is-moving');}
+      document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
+    });
+    if(handle)handle.addEventListener('mousedown',function(e){
+      e.preventDefault();var sx=e.clientX,sy=e.clientY,w=win.offsetWidth,h=win.offsetHeight;
+      function move(ev){win.style.width=Math.max(300,w+ev.clientX-sx)+'px';win.style.height=Math.max(200,h+ev.clientY-sy)+'px';}
+      function up(){document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);}
+      document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
+    });
+  }
+  bindWindow(document.getElementById('pomoWin'));
+  bindWindow(document.getElementById('todoWin'));
+
+  document.addEventListener('click',function(event){
+    var el=event.target.closest('[data-action]');if(!el)return;
+    var action=el.getAttribute('data-action'),host=el.closest('[data-id]');
+    switch(action){
+      case 'mode':
+        STATE.mode=el.getAttribute('data-mode');renderMode();
+        toast('已切换到'+(STATE.mode==='mini'?'极简模式（两个独立小窗）':STATE.mode==='standard'?'标准模式（四视图）':'并排对比模式'));break;
+      case 'pin':
+        STATE.alwaysOnTop=!STATE.alwaysOnTop;renderMode();
+        toast(STATE.alwaysOnTop?'已开启始终置顶（两窗同步 · 模拟 setAlwaysOnTop）':'已关闭始终置顶');break;
+      case 'close-win':{
+        var key=el.getAttribute('data-win');STATE.windows[key]=false;
+        (key==='pomo'?document.getElementById('pomoWin'):document.getElementById('todoWin')).classList.add('hidden');
+        renderReopen();toast((key==='pomo'?'番茄钟':'TODO')+'小窗已关闭');break;}
+      case 'reopen':{
+        var k2=el.getAttribute('data-win');STATE.windows[k2]=true;
+        (k2==='pomo'?document.getElementById('pomoWin'):document.getElementById('todoWin')).classList.remove('hidden');
+        renderReopen();toast((k2==='pomo'?'番茄钟':'TODO')+'小窗已重新打开');break;}
+      case 'nav':STATE.activeView=el.getAttribute('data-nav');renderViews();break;
+      case 'settings':openDataModal();break;
+      case 'data-close':closeDataModal();break;
+      case 'data-export':exportData();break;
+      case 'data-import':document.getElementById('importFile').click();break;
+      case 'auto-backup':{
+        STATE.autoBackup=!STATE.autoBackup;
+        renderAutoBackup();toast('自动备份已'+(STATE.autoBackup?'开启：退出时保留带日期副本':'关闭'));break;}
+      case 'pomo-toggle':STATE.pomodoro.running=!STATE.pomodoro.running;renderPomodoro();toast(STATE.pomodoro.running?'▶ 番茄钟开始倒计时':'⏸ 番茄钟已暂停');break;
+      case 'pomo-reset':STATE.pomodoro.running=false;STATE.pomodoro.remainingSec=STATE.pomodoro.totalSec;renderPomodoro();toast('↺ 番茄钟已重置');break;
+      case 'pomo-config':STATE.configOpen=!STATE.configOpen;renderPomodoro();break;
+      case 'cfg-step':{
+        var f=el.getAttribute('data-field'),d=Number(el.getAttribute('data-delta'));
+        STATE.pomodoroConfig[f]=Math.max(1,Math.min(f==='rounds'?12:180,STATE.pomodoroConfig[f]+d));renderConfigValues();break;}
+      case 'cfg-apply':{
+        var c=STATE.pomodoroConfig;STATE.pomodoro.totalSec=(STATE.pomodoro.phase==='focus'?c.work:c.rest)*60;
+        STATE.pomodoro.remainingSec=STATE.pomodoro.totalSec;STATE.pomodoro.round=Math.min(STATE.pomodoro.round,c.rounds);
+        STATE.configOpen=false;renderPomodoro();toast('⚙ 设置已应用：'+currentTipText());break;}
+      case 'add':addTodoFrom(el.closest('.add-area').querySelector('[data-add-input]'));break;
+      case 'toggle-todo':{
+        var t=findTodo(Number(host.getAttribute('data-id')));if(!t)break;
+        t.completed=!t.completed;if(t.completed&&t.status==='running')t.status='paused';if(t.completed)STATE.activeTodoId=null;
+        renderTodos();toast(t.completed?'✓ 已标记完成':'↩ 已恢复为未完成');break;}
+      case 'timer-toggle':handleTimerToggle(host);break;
+      case 'timer-stop':{
+        var tg=findTodo(Number(host.getAttribute('data-id')));if(!tg)break;
+        tg.status='idle';if(STATE.activeTodoId===tg.id)STATE.activeTodoId=null;renderTodos();toast('■ 计时已停止并结算：'+clock(tg.accumulatedSec));break;}
+      case 'delete-todo':openDeleteConfirm(Number(host.getAttribute('data-id')));break;
+      case 'cancel-delete':closeDeleteConfirm();break;
+      case 'confirm-delete':confirmDelete();break;
+      case 'notes':openNotes(el);break;
+      case 'notes-close':closeNotes();break;
+      case 'notes-save':{
+        var nt=findTodo(STATE.notesTodoId);if(nt){nt.notes=document.getElementById('notesInput').innerHTML.trim();renderTodos();toast('富文本备注已保存');}closeNotes();break;}
+      case 'gran':STATE.granularity=el.getAttribute('data-gran');renderSummary();break;
+      case 'toggle-broken':STATE.brokenSummary=!STATE.brokenSummary;renderSummary();toast(STATE.brokenSummary?'已复现修复前：第三张卡掉行占满整行':'已恢复修复后：三卡等宽同排');break;
+      default:break;
+    }
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&e.target.matches&&e.target.matches('[data-add-input]')){e.preventDefault();addTodoFrom(e.target);}
+    else if(e.key==='Escape'){closeNotes();closeDataModal();closeDeleteConfirm();}
+  });
+  document.getElementById('noteBackdrop').addEventListener('mousedown',closeNotes);
+  document.getElementById('dataBackdrop').addEventListener('mousedown',closeDataModal);
+  document.getElementById('confirmBackdrop').addEventListener('mousedown',closeDeleteConfirm);
+  window.addEventListener('resize',function(){if(STATE.notesTodoId!==null)closeNotes();});
+
+  /* 一秒心跳 */
+  window.setInterval(function(){
+    var changed=false,p=STATE.pomodoro;
+    if(p.running){
+      p.remainingSec-=1;changed=true;
+      if(p.remainingSec<=0){
+        p.running=false;
+        if(p.phase==='focus'){p.phase='break';p.totalSec=STATE.pomodoroConfig.rest*60;toast('本轮专注完成，进入 '+STATE.pomodoroConfig.rest+' 分钟短休息');}
+        else{p.phase='focus';p.round=p.round%STATE.pomodoroConfig.rounds+1;p.totalSec=STATE.pomodoroConfig.work*60;toast('休息结束，进入下一轮专注');}
+        p.remainingSec=p.totalSec;
+      }
+    }
+    var a=STATE.activeTodoId?findTodo(STATE.activeTodoId):null;
+    if(a&&a.status==='running'){a.accumulatedSec+=1;changed=true;}
+    if(changed)tickTimes();
+  },1000);
+
+  renderMode();renderViews();renderPomodoro();renderTodos();renderSummary();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+appId: com.scheduleflow.desktop
+productName: Schedule Flow
+copyright: Copyright © 2026 Schedule Flow
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - '!src/**/*'
+  - '!docs/**/*'
+  - '!electron.vite.config.ts'
+  - '!tsconfig.json'
+  - '!*.md'
+win:
+  # 首版不签名、使用 Electron 默认图标：跳过 rcedit 资源编辑，避免非管理员环境下
+  # winCodeSign 工具解压符号链接失败（无需管理员权限即可打包）。
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: '${productName}-${version}-${arch}.${ext}'
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Schedule Flow
+# 首版不签名、不指定自定义图标（使用 electron-builder 默认图标，避免缺失 ico 导致打包失败）。

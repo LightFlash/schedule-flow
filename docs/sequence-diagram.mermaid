@@ -1,0 +1,153 @@
+%% 时序图 1：应用启动与崩溃恢复
+sequenceDiagram
+    participant U as 用户
+    participant M as main/index.ts
+    participant S as StoreService
+    participant P as PomodoroEngine
+    participant W as WorkTimerEngine
+    participant R as Renderer/AppStore
+
+    U->>M: 双击 exe 启动
+    M->>S: getAppData()
+    S-->>M: AppData（含 pomodoroRuntime / workTimerRuntime）
+    M->>P: restore(pomodoroRuntime)
+    alt 恢复前为 running
+        P->>P: 以 phaseStartedAt 计算已过时间，可能立即到点切换
+    end
+    M->>W: restore(workTimerRuntime)
+    alt 恢复前为 running
+        W->>W: sessionElapsed = now - startedAt（真实经过时间）
+    else 恢复前为 paused
+        W->>W: sessionElapsed = accumulatedBeforePauseMs
+    end
+    M->>M: 创建 BrowserWindow，注册 IPC，启动 250ms tick
+    M->>R: 渲染进程加载完成 → data:get / timer:tick
+    R->>M: invoke('data:get')
+    M-->>R: AppData 快照（todos/settings）
+    R->>R: 初始化 Zustand store，展示恢复后状态
+
+%% 时序图 2：番茄钟到点强提醒
+sequenceDiagram
+    participant T as 计时器(250ms)
+    participant P as PomodoroEngine
+    participant S as StoreService
+    participant RE as ReminderService
+    participant PS as PushService
+    participant W as BrowserWindow
+    participant R as ReminderOverlay(Renderer)
+    participant U as 用户
+
+    loop 每 250ms
+        T->>P: tick()
+        P->>P: remaining = phaseEndAt - now
+        P-->>R: IpcEvent.TICK { pomodoro, workTimer }
+    end
+    P->>P: remaining <= 0 → onPhaseEnd()
+    alt 当前为 work 阶段
+        P->>S: addPomodoroRecord({finishedAt:now, round})
+    end
+    P->>P: 计算下一阶段（自动继续计时，决策6）
+    P->>S: savePomodoroRuntime(新运行态)
+    P->>RE: trigger(payload, settings)
+    RE->>W: show()/restore()/focus()
+    RE->>W: setAlwaysOnTop(true,'screen-saver')
+    RE->>W: flashFrame(true)
+    RE->>R: send('reminder:show', payload)
+    R->>R: 显示闪烁遮罩（CSS 高亮）
+    RE->>PS: sendPush(settings.push, title, desp)
+    PS-->>RE: PushResult[]（失败已吞异常）
+    alt 未完成全部轮次
+        P->>P: 阶段推进（work→break 或 break→下一轮 work）
+    else 全部轮次完成（决策5）
+        P->>P: status=idle，重置运行态
+        P->>R: send('pomodoro:allDone')
+    end
+    U->>R: 点击「确认/关闭提醒」
+    R->>M: invoke('reminder:confirm')
+    M->>RE: confirm()
+    RE->>W: setAlwaysOnTop(false), flashFrame(false)
+    RE->>R: send('reminder:hide')
+    Note over P,R: 计时不因提醒未确认而暂停，符合默认决策6
+
+%% 时序图 3：工作计时启停/暂停/互斥切换
+sequenceDiagram
+    participant U as 用户
+    participant V as WorkTimerView
+    participant AS as AppStore
+    participant B as ElectronBridge
+    participant IP as IpcRegistry
+    participant W as WorkTimerEngine
+    participant S as StoreService
+
+    U->>V: 选择工作项A，点击开始
+    V->>AS: startWork(todoIdA)
+    AS->>B: invoke('workTimer:start', {todoId:A})
+    B->>IP: handle
+    IP->>W: start(A)
+    alt 已有其他计时项 activeTimerId ≠ A
+        W-->>IP: {ok:false, message:'请先停止当前计时'}
+        IP-->>AS: 结果
+        AS->>U: 弹窗确认「停止当前项并开始A？」
+        U->>AS: 确认
+        AS->>B: invoke('workTimer:stop') 然后 invoke('workTimer:start', A)
+    end
+    W->>S: saveWorkTimerRuntime({activeTimerId:A, startedAt:now, status:running})
+    W-->>IP: {ok:true}
+    IP-->>AS: 结果 → refreshData
+    loop 计时中
+        W-->>AS: TICK { workTimer: sessionElapsedMs=now-startedAt }
+    end
+    U->>V: 点击暂停
+    V->>AS: pauseWork()
+    AS->>B: invoke('workTimer:pause')
+    B->>IP: handle
+    IP->>W: pause()
+    W->>W: accumulatedBeforePauseMs += now - startedAt；记录 pauseStartedAt
+    W->>S: saveWorkTimerRuntime(status=paused)
+    U->>V: 点击停止
+    V->>AS: stopWork()
+    AS->>B: invoke('workTimer:stop')
+    B->>IP: handle
+    IP->>W: stop()
+    W->>W: sessionMs = running ? now-startedAt : accumulatedBeforePauseMs
+    W->>S: todo.accumulatedMs += sessionMs；lastTimingAt=now；timingStatus=idle
+    opt settings.autoMarkComplete = true
+        W->>S: todo.completed=true, completedAt=now
+    end
+    W->>S: saveWorkTimerRuntime(清空 activeTimerId)
+    S-->>AS: data:changed → refreshData
+    Note over S: 每次状态转换均持久化，崩溃后按时间戳恢复
+
+%% 时序图 4：TODO 完成 → 汇总归档
+sequenceDiagram
+    participant U as 用户
+    participant TV as TodoView
+    participant AS as AppStore
+    participant B as ElectronBridge
+    participant IP as IpcRegistry
+    participant S as StoreService
+    participant SS as SummaryService
+    participant SV as SummaryView
+
+    U->>TV: 勾选完成 / 编辑备注
+    TV->>AS: toggleTodo(id) / updateTodo(id,{notes})
+    AS->>B: invoke('todo:toggle' / 'todo:update')
+    B->>IP: handle
+    IP->>S: toggleTodo(id) → completed=true, completedAt=now
+    IP->>S: updateTodo(id, patch) → 自动保存 notes
+    S-->>AS: data:changed → refreshData
+    U->>SV: 切换到汇总，选择「周」
+    SV->>AS: loadSummary('week')
+    AS->>B: invoke('summary:get', 'week')
+    B->>IP: handle
+    IP->>SS: buildSummary('week')
+    SS->>S: 读取 todos + pomodoroRecords
+    SS->>SS: periodRange('week') → 本周一00:00 ~ 下周一00:00
+    loop 每个 todo
+        SS->>SS: archivedAt = completed ? completedAt : lastTimingAt
+        SS->>SS: 落在周期内则计入 completedCount / totalWorkMs / items
+    end
+    SS->>SS: 统计周期内 PomodoroRecord 数 → completedPomodoroRounds
+    SS-->>IP: Summary
+    IP-->>AS: {ok:true, data:Summary}
+    AS->>SV: 渲染统计卡片 + 明细列表（可展开完整心得）

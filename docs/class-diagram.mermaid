@@ -1,0 +1,188 @@
+classDiagram
+    %% ===== 数据模型 =====
+    class Todo {
+        +string id
+        +string title
+        +string notes
+        +boolean completed
+        +number createdAt
+        +number completedAt
+        +number accumulatedMs
+        +number lastTimingAt
+        +TimingStatus timingStatus
+    }
+    class PomodoroConfig {
+        +number workMinutes
+        +number breakMinutes
+        +number rounds
+    }
+    class PushConfig {
+        +string serverChanKey
+        +string pushPlusToken
+        +PushChannel[] channels
+    }
+    class Settings {
+        +PushConfig push
+        +PomodoroConfig pomodoro
+        +boolean autoMarkComplete
+    }
+    class PomodoroRecord {
+        +string id
+        +number finishedAt
+        +number round
+        +number workDurationMs
+    }
+    class PomodoroRuntime {
+        +PomodoroStatus status
+        +PomodoroPhase phase
+        +number currentRound
+        +number totalRounds
+        +PomodoroConfig config
+        +number phaseStartedAt
+        +number pausedRemainingMs
+    }
+    class WorkTimerRuntime {
+        +string activeTimerId
+        +TimingStatus status
+        +number startedAt
+        +number accumulatedBeforePauseMs
+        +number pauseStartedAt
+    }
+    class AppData {
+        +number version
+        +Todo[] todos
+        +Settings settings
+        +PomodoroRecord[] pomodoroRecords
+        +PomodoroRuntime pomodoroRuntime
+        +WorkTimerRuntime workTimerRuntime
+    }
+    class Summary {
+        +Granularity granularity
+        +string periodKey
+        +number periodStart
+        +number periodEnd
+        +number completedCount
+        +number totalWorkMs
+        +number completedPomodoroRounds
+        +SummaryItem[] items
+    }
+
+    %% ===== 服务类（主进程）=====
+    class StoreService {
+        -ElectronStore~AppData~ store
+        +getAppData() AppData
+        +getTodos() Todo[]
+        +addTodo(title) Todo
+        +updateTodo(id, patch) Todo
+        +deleteTodo(id) void
+        +toggleTodo(id) Todo
+        +getSettings() Settings
+        +saveSettings(s) Settings
+        +addPomodoroRecord(r) void
+        +savePomodoroRuntime(r) void
+        +saveWorkTimerRuntime(r) void
+        -persistAndBroadcast() void
+    }
+    class PomodoroEngine {
+        -StoreService store
+        -ReminderService reminder
+        -BrowserWindow win
+        -Timer tickTimer
+        +start() void
+        +pause() void
+        +resume() void
+        +reset() void
+        +updateConfig(c) void
+        +getViewState() PomodoroViewState
+        +restore(runtime) void
+        -tick() void
+        -onPhaseEnd() void
+    }
+    class WorkTimerEngine {
+        -StoreService store
+        -BrowserWindow win
+        +start(todoId) IpcResult
+        +stop() void
+        +pause() void
+        +resume() void
+        +getViewState() WorkTimerViewState
+        +restore(runtime) void
+        -sessionElapsedMs(runtime) number
+    }
+    class PushService {
+        +sendPush(cfg, title, desp) PushResult[]
+        +sendTest(cfg) PushResult[]
+        -sendServerChan(key, title, desp) PushResult
+        -sendPushPlus(token, title, desp) PushResult
+    }
+    class ReminderService {
+        -BrowserWindow win
+        -PushService push
+        +trigger(payload, settings) void
+        +confirm() void
+        -flashWindow() void
+    }
+    class SummaryService {
+        -StoreService store
+        +buildSummary(g) Summary
+        -periodRange(g) number[]
+        -archiveTimeOf(todo) number
+    }
+    class IpcRegistry {
+        -StoreService store
+        -PomodoroEngine pomodoro
+        -WorkTimerEngine workTimer
+        -SummaryService summary
+        -PushService push
+        -ReminderService reminder
+        +registerAll() void
+    }
+
+    %% ===== 渲染层 =====
+    class ElectronBridge {
+        +invoke(cmd, payload) Promise~IpcResult~
+        +on(event, handler) Unsubscribe
+    }
+    class AppStore {
+        +Todo[] todos
+        +Settings settings
+        +PomodoroViewState pomodoro
+        +WorkTimerViewState workTimer
+        +Summary summary
+        +ReminderPayload reminder
+        +ViewKey activeView
+        +initialize() Promise
+        +refreshData() Promise
+        +addTodo(title) Promise
+        +updateTodo(id, patch) Promise
+        +toggleTodo(id) Promise
+        +saveSettings(s) Promise
+        +startPomodoro() Promise
+        +startWork(todoId) Promise
+        +loadSummary(g) Promise
+        +confirmReminder() Promise
+    }
+
+    %% ===== 关系 =====
+    AppData "1" *-- "many" Todo : 包含
+    AppData "1" *-- "1" Settings : 包含
+    AppData "1" *-- "many" PomodoroRecord : 包含
+    AppData "1" *-- "1" PomodoroRuntime : 包含
+    AppData "1" *-- "1" WorkTimerRuntime : 包含
+    Settings "1" *-- "1" PushConfig : 包含
+    Settings "1" *-- "1" PomodoroConfig : 包含
+    Summary "1" *-- "many" SummaryItem : 包含
+
+    StoreService --> AppData : 管理
+    PomodoroEngine --> StoreService : 读写运行态/记录
+    PomodoroEngine --> ReminderService : 到点触发
+    WorkTimerEngine --> StoreService : 读写运行态/累计
+    ReminderService --> PushService : 委托推送
+    SummaryService --> StoreService : 读数据
+    IpcRegistry --> StoreService : 路由
+    IpcRegistry --> PomodoroEngine : 路由
+    IpcRegistry --> WorkTimerEngine : 路由
+    IpcRegistry --> SummaryService : 路由
+    IpcRegistry --> ReminderService : 路由
+    AppStore --> ElectronBridge : 调用
+    ElectronBridge ..> IpcRegistry : IPC 通道
