@@ -10,6 +10,7 @@ import {
   Button,
   Chip,
   FormControl,
+  IconButton,
   InputLabel,
   List,
   ListItem,
@@ -18,14 +19,13 @@ import {
   Paper,
   Select,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import StopIcon from '@mui/icons-material/Stop';
-import PauseIcon from '@mui/icons-material/Pause';
-import { formatClock } from '@shared/time';
+import { formatClock, formatDuration } from '@shared/time';
 import type { TimingStatus } from '@shared/types';
 import { useAppStore } from '../store/useAppStore';
+import LucideIcon from '../components/LucideIcon';
 
 const STATUS_LABEL: Record<TimingStatus, string> = {
   idle: '未开始',
@@ -97,15 +97,15 @@ export default function WorkTimerView(): ReactElement {
             {displayTitle || '未选择工作项'} · 本次用时
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            累计用时 {formatClock(workTimer.activeAccumulatedMs + (isActiveItem ? workTimer.sessionElapsedMs : 0))}
+            累计用时 {formatDuration(workTimer.activeAccumulatedMs + (isActiveItem ? workTimer.sessionElapsedMs : 0))}
           </Typography>
         </Box>
 
-        <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
+        <Stack direction="row" spacing={2} justifyContent="center" alignItems="center" sx={{ mt: 3 }}>
           {(!isActiveItem || workTimer.status === 'idle') && (
             <Button
               variant="contained"
-              startIcon={<PlayArrowIcon />}
+              startIcon={<LucideIcon name="play" size={16} />}
               onClick={handleStart}
               disabled={selectedId === ''}
             >
@@ -114,22 +114,42 @@ export default function WorkTimerView(): ReactElement {
           )}
           {isActiveItem && workTimer.status === 'running' && (
             <>
-              <Button variant="contained" startIcon={<PauseIcon />} onClick={() => void pauseWork()}>
+              <Button
+                variant="contained"
+                startIcon={<LucideIcon name="pause" size={16} />}
+                onClick={() => void pauseWork()}
+              >
                 暂停
               </Button>
-              <Button variant="outlined" color="inherit" startIcon={<StopIcon />} onClick={() => void stopWork()}>
-                停止
-              </Button>
+              <Tooltip title="停止并结算用时">
+                <IconButton
+                  aria-label="停止并结算用时"
+                  onClick={() => void stopWork()}
+                  sx={{ width: 40, height: 40, border: '1px solid', borderColor: 'divider', bgcolor: '#F8FAFC', color: 'text.secondary' }}
+                >
+                  <LucideIcon name="square" size={16} />
+                </IconButton>
+              </Tooltip>
             </>
           )}
           {isActiveItem && workTimer.status === 'paused' && (
             <>
-              <Button variant="contained" startIcon={<PlayArrowIcon />} onClick={() => void resumeWork()}>
+              <Button
+                variant="contained"
+                startIcon={<LucideIcon name="play" size={16} />}
+                onClick={() => void resumeWork()}
+              >
                 继续
               </Button>
-              <Button variant="outlined" color="inherit" startIcon={<StopIcon />} onClick={() => void stopWork()}>
-                停止
-              </Button>
+              <Tooltip title="停止并结算用时">
+                <IconButton
+                  aria-label="停止并结算用时"
+                  onClick={() => void stopWork()}
+                  sx={{ width: 40, height: 40, border: '1px solid', borderColor: 'divider', bgcolor: '#F8FAFC', color: 'text.secondary' }}
+                >
+                  <LucideIcon name="square" size={16} />
+                </IconButton>
+              </Tooltip>
             </>
           )}
         </Stack>
@@ -147,7 +167,7 @@ export default function WorkTimerView(): ReactElement {
               const active = workTimer.activeTodoId === todo.id;
               return (
                 <ListItem key={todo.id} divider disableGutters>
-                  <ListItemText primary={todo.title} secondary={`累计 ${formatClock(todo.accumulatedMs)}`} />
+                  <ListItemText primary={todo.title} secondary={`累计 ${formatDuration(todo.accumulatedMs)}`} />
                   <Chip
                     size="small"
                     label={active ? STATUS_LABEL[workTimer.status] : STATUS_LABEL[todo.timingStatus]}
