@@ -4,11 +4,17 @@
 
 ## 界面预览
 
-| 标准模式 | 极简模式（双独立小窗） |
-| --- | --- |
-| ![标准模式](docs/screenshots/standard.png) | ![极简模式](docs/screenshots/mini-windows.png) |
+**标准模式**
 
-<!-- 更多截图可继续追加：汇总页 docs/screenshots/summary.png -->
+| 番茄钟 | TODO 清单 |
+| --- | --- |
+| ![番茄钟](docs/screenshots/standard.png) | ![TODO 清单](docs/screenshots/todo.png) |
+| **工作计时** | **工作汇总** |
+| ![工作计时](docs/screenshots/worktimer.png) | ![工作汇总](docs/screenshots/summary.png) |
+
+**极简模式 · 双独立小窗**（可拖动 / 缩放 / 单独置顶，托盘常驻）
+
+![极简模式](docs/screenshots/mini-windows.png)
 
 ## 下载安装
 
