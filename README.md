@@ -21,7 +21,7 @@
 到 [Releases](https://github.com/LightFlash/schedule-flow/releases) 页面下载：
 
 - **安装版**：`Schedule Flow-1.0.1-x64.exe`，双击按向导安装（可自选目录，创建桌面/开始菜单快捷方式）。
-- **便携版**：`Schedule-Flow-1.0.1-portable.rar`（94MB），用 WinRAR / 7-Zip / Bandizip 解压后运行 `Schedule Flow.exe`，免安装、可放 U 盘。
+- **便携版**：`Schedule-Flow-1.0.1-portable.rar`，用 WinRAR / 7-Zip / Bandizip 解压后运行 `Schedule Flow.exe`，免安装、可放 U 盘。
 
 > 首次运行若被 Windows Defender / 杀软提示，选择"允许"（Electron 应用未做代码签名）。
 
