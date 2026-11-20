@@ -315,17 +315,48 @@ export class StoreService {
     this.persistAndBroadcast();
   }
 
-  /** 拖拽排序：按提交的完整 id 顺序重排；id 集合不一致时拒绝。 */
+  /** 开始计时自动置顶：把指定工作项移到清单顶部。 */
+  moveTodoToTop(id: string): void {
+    const todos = this.store.get('todos');
+    const index = todos.findIndex((todo) => todo.id === id);
+    if (index <= 0) return;
+    const next = [...todos];
+    const [item] = next.splice(index, 1);
+    next.unshift(item);
+    this.store.set('todos', next);
+    this.persistAndBroadcast();
+  }
+
+  /** 取消完成后归位：移到未完成区的末尾（第一个已完成项之前）。 */
+  moveTodoToUncompletedEnd(id: string): void {
+    const todos = this.store.get('todos');
+    const index = todos.findIndex((todo) => todo.id === id);
+    if (index < 0) return;
+    const next = [...todos];
+    const [item] = next.splice(index, 1);
+    const firstCompleted = next.findIndex((todo) => todo.completed);
+    if (firstCompleted < 0) next.push(item);
+    else next.splice(firstCompleted, 0, item);
+    this.store.set('todos', next);
+    this.persistAndBroadcast();
+  }
+
+  /**
+   * 排序：按提交的 id 顺序重排这些项的相对位置，未列入的项（如隔天完成的折叠项）
+   * 保持原有相对位置；id 重复 / 未知 / 空数组时拒绝。
+   */
   reorderTodos(ids: string[]): void {
     const todos = this.store.get('todos');
-    if (!Array.isArray(ids) || ids.length !== todos.length) {
-      throw new Error('排序数据与清单不一致');
+    if (!Array.isArray(ids) || ids.length === 0 || new Set(ids).size !== ids.length) {
+      throw new Error('排序数据不合法');
     }
     const byId = new Map(todos.map((todo) => [todo.id, todo]));
     if (ids.some((id) => !byId.has(id))) {
       throw new Error('排序数据与清单不一致');
     }
-    const next = ids.map((id) => byId.get(id) as (typeof todos)[number]);
+    const listed = new Set(ids);
+    let cursor = 0;
+    const next = todos.map((todo) => (listed.has(todo.id) ? byId.get(ids[cursor++]) as (typeof todos)[number] : todo));
     this.store.set('todos', next);
     this.persistAndBroadcast();
   }

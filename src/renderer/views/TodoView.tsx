@@ -47,6 +47,18 @@ interface SortableRowProps {
   children: ReactNode;
 }
 
+/** completedAt 是否为今天（本地时区）；无时间戳视为今天，保持可见。 */
+function isTodayTs(ts: number | null): boolean {
+  if (ts === null) return true;
+  const date = new Date(ts);
+  const now = new Date();
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
+}
+
 function SortableRow({ index, totalCount, onMove, onCommit, children }: SortableRowProps): ReactElement {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -258,7 +270,7 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
         {!compact && <Chip size="small" label={formatDuration(liveAccumulatedMs)} sx={{ mr: 0.5 }} />}
 
         <Stack direction="row" spacing={0.25} alignItems="center" sx={{ flexShrink: 0 }}>
-          {!compact && (
+          {!compact && !todo.completed && (
             <>
               <Tooltip title={canMoveUp ? '上移' : '已经在最上面'}>
                 <span>
@@ -375,16 +387,27 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
 
   // 拖拽排序：拖动期间用本地顺序即时预览（跟手交换），松手一次性提交最终顺序。
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [showEarlier, setShowEarlier] = useState(false);
 
-  const visibleTodos = useMemo<Todo[]>(() => {
-    if (!dragOrder) return todos;
-    const byId = new Map(todos.map((item) => [item.id, item]));
-    return dragOrder.map((id) => byId.get(id)).filter((item): item is Todo => Boolean(item));
-  }, [dragOrder, todos]);
+  // 隔天（今天之前）完成的项折叠到底部「更早完成」区，主列表只保留未完成 + 今天完成。
+  const earlierTodos = useMemo(
+    () => todos.filter((todo) => todo.completed && !isTodayTs(todo.completedAt)),
+    [todos],
+  );
+  const todosById = useMemo(() => new Map(todos.map((item) => [item.id, item])), [todos]);
+  const mainOrder = useMemo(
+    () => todos.filter((todo) => !todo.completed || isTodayTs(todo.completedAt)).map((item) => item.id),
+    [todos],
+  );
+  const displayOrder = dragOrder ?? mainOrder;
+  const mainTodos = useMemo(
+    () => displayOrder.map((id) => todosById.get(id)).filter((item): item is Todo => Boolean(item)),
+    [displayOrder, todosById],
+  );
 
   const handleDragMove = (from: number, to: number): void => {
     setDragOrder((previous) => {
-      const base = previous ?? todos.map((item) => item.id);
+      const base = previous ?? mainOrder;
       if (from < 0 || from >= base.length || to < 0 || to >= base.length) return previous;
       const next = [...base];
       const [item] = next.splice(from, 1);
@@ -458,12 +481,13 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
           </Typography>
         </Paper>
       ) : (
+        <>
         <List disablePadding>
-          {visibleTodos.map((todo, index) => (
+          {mainTodos.map((todo, index) => (
             <SortableRow
               key={todo.id}
               index={index}
-              totalCount={visibleTodos.length}
+              totalCount={mainTodos.length}
               onMove={handleDragMove}
               onCommit={handleDragCommit}
             >
@@ -472,11 +496,38 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
                 isActive={activeTodoId === todo.id}
                 compact={compact}
                 canMoveUp={index > 0}
-                canMoveDown={index < visibleTodos.length - 1}
+                canMoveDown={index < mainTodos.length - 1}
               />
             </SortableRow>
           ))}
         </List>
+
+        {!compact && earlierTodos.length > 0 && (
+          <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', mt: 0.5 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={0.5}
+              onClick={() => setShowEarlier((previous) => !previous)}
+              sx={{ px: 1.5, py: 1, cursor: 'pointer', userSelect: 'none', '&:hover': { bgcolor: '#F8FAFC' } }}
+            >
+              <IconButton size="small" aria-label={showEarlier ? '收起更早完成项' : '展开更早完成项'} sx={{ color: '#94A3B8' }}>
+                <LucideIcon name={showEarlier ? 'chevron-up' : 'chevron-down'} size={16} />
+              </IconButton>
+              <Typography variant="body2" color="text.secondary">
+                更早完成（{earlierTodos.length}）
+              </Typography>
+            </Stack>
+            {showEarlier && (
+              <List disablePadding sx={{ px: 0.5, pb: 0.5 }}>
+                {earlierTodos.map((todo) => (
+                  <TodoRow key={todo.id} todo={todo} isActive={false} compact={compact} />
+                ))}
+              </List>
+            )}
+          </Paper>
+        )}
+        </>
       )}
     </Box>
   );

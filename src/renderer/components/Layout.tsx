@@ -4,6 +4,7 @@
  */
 
 import type { ReactElement, ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box,
   Button,
@@ -16,6 +17,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { ViewKey } from '@shared/types';
+import { bridge } from '../api/bridge';
 import { useAppStore } from '../store/useAppStore';
 import LucideIcon from './LucideIcon';
 
@@ -45,6 +47,20 @@ export default function Layout({ children }: { children: ReactNode }): ReactElem
   const openSettings = useAppStore((state) => state.openSettings);
   const openDataManager = useAppStore((state) => state.openDataManager);
   const setMode = useAppStore((state) => state.setMode);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    bridge
+      .getAppVersion()
+      .then((version) => {
+        setAppVersion(version);
+        // 主窗口标题带版本号（index.html 的固定 title 会在页面加载后覆盖窗口标题）。
+        document.title = `Schedule Flow v${version}`;
+      })
+      .catch(() => {
+        /* 版本号获取失败不影响使用 */
+      });
+  }, []);
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -120,6 +136,11 @@ export default function Layout({ children }: { children: ReactNode }): ReactElem
               设置
             </Button>
           </Tooltip>
+          {appVersion && (
+            <Typography variant="caption" color="text.secondary" sx={{ px: 1.5, pt: 0.5 }}>
+              v{appVersion}
+            </Typography>
+          )}
         </Box>
       </Box>
 

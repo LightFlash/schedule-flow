@@ -17,6 +17,7 @@ export const IpcCommand = {
   SETTINGS_TEST_PUSH: 'settings:testPush',
   DATA_EXPORT: 'data:export',
   DATA_IMPORT: 'data:import',
+  APP_VERSION: 'app:version',
   AUTO_BACKUP_SET: 'autoBackup:set',
   // 窗口（模式级）
   WINDOW_SET_PINNED: 'window:setPinned',

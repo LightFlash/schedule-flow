@@ -47,6 +47,8 @@ export class WorkTimerEngine {
       pauseStartedAt: null,
     });
     this.store.updateTodo(todoId, { timingStatus: 'running' });
+    // 开始计时的工作项自动置顶，方便随时看到当前专注对象。
+    this.store.moveTodoToTop(todoId);
     return { ok: true, message: '已开始计时' };
   }
 
@@ -71,6 +73,8 @@ export class WorkTimerEngine {
         ...(autoMarkComplete ? { completed: true, completedAt: now } : {}),
       };
       this.store.updateTodo(todo.id, patch);
+      // 开启 autoMarkComplete 停止即完成时，同样自动沉底，与勾选完成行为一致。
+      if (autoMarkComplete) this.store.moveTodoToEnd(todo.id);
     }
 
     this.store.saveWorkTimerRuntime(emptyRuntime());

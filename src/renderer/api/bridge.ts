@@ -61,6 +61,7 @@ export const bridge = {
     invoke<Todo>(IpcCommand.TODO_ADD, { title } satisfies TodoAddPayload),
   updateTodo: (id: string, patch: TodoPatch): Promise<Todo> =>
     invoke<Todo>(IpcCommand.TODO_UPDATE, { id, patch } satisfies TodoUpdatePayload),
+  getAppVersion: (): Promise<string> => invoke<string>(IpcCommand.APP_VERSION),
   deleteTodo: (id: string): Promise<void> =>
     invoke<void>(IpcCommand.TODO_DELETE, { id } satisfies IdPayload),
   toggleTodo: (id: string): Promise<Todo> =>

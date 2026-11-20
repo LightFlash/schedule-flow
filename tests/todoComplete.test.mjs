@@ -92,7 +92,7 @@ test('moveTodo 上下移交换相邻位置，越界忽略、非法载荷拒绝',
   assert.equal(bad.ok, false, 'offset 必须是 -1 或 1');
 });
 
-test('reorderTodos 按完整 id 顺序重排；集合不一致被拒绝', async () => {
+test('reorderTodos：子集重排保持未列入项位置；未知 id / 空数组拒绝', async () => {
   const { store } = setup([
     makeTodo({ id: 'A' }),
     makeTodo({ id: 'B' }),
@@ -102,13 +102,44 @@ test('reorderTodos 按完整 id 顺序重排；集合不一致被拒绝', async 
   await invoke(IpcCommand.TODO_REORDER, { ids: ['C', 'A', 'B'] });
   assert.deepEqual(store.getTodos().map((t) => t.id), ['C', 'A', 'B']);
 
-  const mismatch = await invoke(IpcCommand.TODO_REORDER, { ids: ['C', 'A'] });
-  assert.equal(mismatch.ok, false, '数量不一致必须拒绝');
+  // 子集语义：只重排提交的项在原槽位上的相对位置，未列入的 B 保持原位置。
+  await invoke(IpcCommand.TODO_REORDER, { ids: ['A', 'C'] });
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['A', 'C', 'B']);
 
   const unknown = await invoke(IpcCommand.TODO_REORDER, { ids: ['C', 'A', 'X'] });
   assert.equal(unknown.ok, false, '未知 id 必须拒绝');
-  assert.deepEqual(store.getTodos().map((t) => t.id), ['C', 'A', 'B'], '拒绝后顺序不变');
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['A', 'C', 'B'], '拒绝后顺序不变');
 
   const empty = await invoke(IpcCommand.TODO_REORDER, { ids: [] });
   assert.equal(empty.ok, false, '空数组拒绝');
+});
+
+test('开始计时自动置顶；取消完成归位到未完成区末尾', async () => {
+  const { store, workTimer } = setup([
+    makeTodo({ id: 'A', title: '第一个' }),
+    makeTodo({ id: 'B', title: '已完成项', completed: true, completedAt: Date.now() }),
+    makeTodo({ id: 'C', title: '第三个' }),
+  ]);
+
+  // 开始计时：A 自动置顶（本来就在顶部，顺序不变），计时不受影响
+  assert.equal(workTimer.start('A').ok, true);
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['A', 'B', 'C']);
+  assert.equal(workTimer.getViewState().status, 'running');
+
+  // 取消 B 的完成：归位到未完成区的末尾（C 之前）——A 的计时不受影响
+  await invoke(IpcCommand.TODO_TOGGLE, { id: 'B' });
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['A', 'C', 'B'], '取消完成插入未完成区末尾');
+  assert.equal(store.getTodos().find((t) => t.id === 'B').completed, false);
+  assert.equal(workTimer.getViewState().activeTodoId, 'A', '其它项的计时不被干扰');
+
+  // 再勾选 B 完成：沉底
+  await invoke(IpcCommand.TODO_TOGGLE, { id: 'B' });
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['A', 'C', 'B']);
+});
+
+test('开始计时的项若已在顶部或唯一，顺序保持不变', async () => {
+  const { store, workTimer } = setup([makeTodo({ id: 'A' })]);
+  assert.equal(workTimer.start('A').ok, true);
+  assert.deepEqual(store.getTodos().map((t) => t.id), ['A']);
+  await invoke(IpcCommand.WORK_STOP);
 });

@@ -86,6 +86,7 @@ export class IpcRegistry {
   registerAll(): void {
     // ===== 数据 =====
     this.handle(IpcCommand.GET_DATA, () => ok(this.store.getAppData()));
+    this.handle(IpcCommand.APP_VERSION, () => ok(app.getVersion()));
 
     this.handle(IpcCommand.TODO_ADD, (raw) => {
       const { title } = payloadOf<TodoAddPayload>(raw);
@@ -125,8 +126,9 @@ export class IpcRegistry {
       const updated = nowCompleted
         ? this.store.updateTodo(id, { completed: true, completedAt: fresh?.completedAt ?? Date.now() })
         : this.store.updateTodo(id, { completed: false, completedAt: null });
-      // 完成的任务自动沉底。
+      // 完成的任务自动沉底；取消完成则归位到未完成区的末尾。
       if (nowCompleted) this.store.moveTodoToEnd(id);
+      else this.store.moveTodoToUncompletedEnd(id);
       return ok(updated);
     });
 

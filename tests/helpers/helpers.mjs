@@ -64,6 +64,24 @@ export function makeStore({ todos = [], settings, pomodoroRecords, pomodoroRunti
     deleteTodo(id) {
       data.todos = data.todos.filter((item) => item.id !== id);
     },
+    moveTodoToTop(id) {
+      const index = data.todos.findIndex((item) => item.id === id);
+      if (index > 0) data.todos.unshift(data.todos.splice(index, 1)[0]);
+    },
+    moveTodoToEnd(id) {
+      const index = data.todos.findIndex((item) => item.id === id);
+      if (index >= 0 && index < data.todos.length - 1) {
+        data.todos.push(data.todos.splice(index, 1)[0]);
+      }
+    },
+    moveTodoToUncompletedEnd(id) {
+      const index = data.todos.findIndex((item) => item.id === id);
+      if (index < 0) return;
+      const [item] = data.todos.splice(index, 1);
+      const firstCompleted = data.todos.findIndex((entry) => entry.completed);
+      if (firstCompleted < 0) data.todos.push(item);
+      else data.todos.splice(firstCompleted, 0, item);
+    },
     toggleTodo(id) {
       const todo = data.todos.find((item) => item.id === id);
       if (!todo) throw new Error('工作项不存在或已被删除');
