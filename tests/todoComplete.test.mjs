@@ -137,9 +137,22 @@ test('开始计时自动置顶；取消完成归位到未完成区末尾', async
   assert.deepEqual(store.getTodos().map((t) => t.id), ['A', 'C', 'B']);
 });
 
-test('开始计时的项若已在顶部或唯一，顺序保持不变', async () => {
-  const { store, workTimer } = setup([makeTodo({ id: 'A' })]);
+test('新增任务插入到计时中任务之下；无计时任务时放最顶', async () => {
+  const { store, workTimer } = setup([
+    makeTodo({ id: 'A', title: '旧任务一' }),
+    makeTodo({ id: 'B', title: '旧任务二' }),
+    makeTodo({ id: 'C', title: '已完成', completed: true, completedAt: Date.now() }),
+  ]);
+
+  // 无计时任务：新任务放最顶
+  await invoke(IpcCommand.TODO_ADD, { title: '新任务一' });
+  const afterFirst = store.getTodos().map((t) => t.title);
+  assert.equal(afterFirst[0], '新任务一', '无计时任务时新任务置顶');
+
+  // 开始计时 A：A 置顶
   assert.equal(workTimer.start('A').ok, true);
-  assert.deepEqual(store.getTodos().map((t) => t.id), ['A']);
-  await invoke(IpcCommand.WORK_STOP);
+  await invoke(IpcCommand.TODO_ADD, { title: '新任务二' });
+  const afterSecond = store.getTodos().map((t) => t.title);
+  assert.equal(afterSecond[0], '旧任务一', '计时中的任务保持最顶');
+  assert.equal(afterSecond[1], '新任务二', '新任务插到计时任务之下');
 });

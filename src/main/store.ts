@@ -268,7 +268,16 @@ export class StoreService {
       lastTimingAt: null,
       timingStatus: 'idle',
     };
-    this.store.set('todos', [...this.store.get('todos'), todo]);
+    // 新任务插入到「正在计时的任务」之下、其它任务之上；无计时任务时放最顶。
+    const todos = [...this.store.get('todos')];
+    const timingIndex = this.store
+      .get('workTimerRuntime')
+      .activeTimerId
+      ? todos.findIndex((item) => item.id === (this.store.get('workTimerRuntime').activeTimerId as string))
+      : -1;
+    const insertAt = timingIndex >= 0 ? timingIndex + 1 : 0;
+    todos.splice(insertAt, 0, todo);
+    this.store.set('todos', todos);
     this.persistAndBroadcast();
     return todo;
   }
@@ -407,22 +416,6 @@ export class StoreService {
     this.store.store = clone(data) as StoreShape;
     this.ensureShape(localWindows);
     this.persistAndBroadcast();
-  }
-
-  /**
-   * 全新安装语义（卸载后重装）：设置 / 窗口布局 / 计时运行态回到默认初始状态，
-   * 仅保留个人工作数据（TODO 清单与番茄钟记录）。
-   * 必须在窗口创建前调用，不触发业务广播。
-   */
-  resetNonPersonalState(): void {
-    const defaults = createDefaultData();
-    const data = this.getAppData();
-    this.store.store = {
-      ...clone(defaults),
-      todos: clone(data.todos),
-      pomodoroRecords: clone(data.pomodoroRecords),
-    } as StoreShape;
-    this.ensureShape();
   }
 
   /** 导出当前全量数据为格式化 JSON，并给出带真实日期的建议文件名。 */

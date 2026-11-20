@@ -8,9 +8,6 @@
 
 import { app, Menu, nativeImage, Tray } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
-import { existsSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { createId } from '@shared/time';
 import { StoreService } from './store';
 import { WindowManager } from './windows';
 import { PomodoroEngine } from './timers/PomodoroEngine';
@@ -33,39 +30,6 @@ let isQuitting = false;
 let pomodoroEngine: PomodoroEngine | null = null;
 let storeService: StoreService | null = null;
 let windowManager: WindowManager | null = null;
-
-/**
- * 全新安装标记：放在安装目录，随卸载一起被删除。
- * 卸载重装后首次启动检测不到标记 → 重置设置 / 窗口布局 / 运行态 / 登录项，
- * 仅保留 TODO 与番茄钟工作数据；之后写入新标记，正常使用期间不再重置。
- */
-const INSTALL_MARKER_NAME = 'schedule-flow-install-marker.json';
-
-function resolveInstallMarkerPath(): string {
-  return join(dirname(app.getPath('exe')), INSTALL_MARKER_NAME);
-}
-
-/** 仅打包版生效；开发模式的 exe 在 node_modules 里，永远不算全新安装。 */
-function detectFreshInstall(): boolean {
-  if (!app.isPackaged) return false;
-  try {
-    return !existsSync(resolveInstallMarkerPath());
-  } catch {
-    return false;
-  }
-}
-
-function writeInstallMarker(): void {
-  try {
-    writeFileSync(
-      resolveInstallMarkerPath(),
-      JSON.stringify({ installId: createId(), version: app.getVersion() }),
-      'utf-8',
-    );
-  } catch {
-    /* 安装目录只读时跳过：下次启动仍会视为全新安装并重置一次，可接受 */
-  }
-}
 
 /** 托盘右键「退出程序」：打标记后走正常 quit 流程，保留 before-quit 的停 tick + 自动备份。 */
 function quitFromTray(): void {
@@ -105,18 +69,11 @@ function createTray(): void {
 }
 
 void app.whenReady().then(() => {
-  const freshInstall = detectFreshInstall();
+  // 数据策略：任何形式的重装（卸载重装 / 覆盖安装）都不清配置——推送凭证、
+  // 番茄参数、计时运行态、窗口布局、TODO 与番茄钟记录全部保留；
+  // 仅当布局结构跨版本变化时，由 store 的 layoutVersion 一次性重置窗口布局。
   const store = new StoreService();
   storeService = store;
-  if (freshInstall) {
-    store.resetNonPersonalState();
-    // 上次安装写入的系统登录项在注册表里会残留，全新安装语义下一并清掉。
-    try {
-      app.setLoginItemSettings({ openAtLogin: false });
-    } catch {
-      /* 忽略 */
-    }
-  }
   const push = new PushService();
   const reminder = new ReminderService(push);
   const workTimer = new WorkTimerEngine(store);
@@ -149,8 +106,6 @@ void app.whenReady().then(() => {
   reminder.setModeVisibilityRestorer(() => wm.syncVisibilityToMode());
 
   pomodoro.startTimerLoop();
-
-  if (freshInstall) writeInstallMarker();
 
   app.on('activate', () => {
     // macOS 点击 Dock 图标时，按当前 mode 唤出对应窗口。
