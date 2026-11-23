@@ -20,7 +20,6 @@ import type {
   PushResult,
   Settings,
   SettingsSavePayload,
-  StartWorkPayload,
   TestPushPayload,
   TodoAddPayload,
   TodoMovePayload,
@@ -29,6 +28,7 @@ import type {
   WindowKeyPayload,
   WindowPinnedPayload,
   WindowState,
+  WorkTargetPayload,
 } from '@shared/types';
 import type { StoreService } from '../store';
 import type { WindowManager } from '../windows';
@@ -48,6 +48,12 @@ function fail<T = never>(message: string): IpcResult<T> {
 
 function payloadOf<T>(payload: unknown): T {
   return payload as T;
+}
+
+/** 工作计时命令统一取 todoId：非字符串 / 空串一律视为参数不完整（返回 null）。 */
+function todoIdOf(payload: unknown): string | null {
+  const { todoId } = payloadOf<Partial<WorkTargetPayload>>(payload ?? {});
+  return typeof todoId === 'string' && todoId.length > 0 ? todoId : null;
 }
 
 function describeError(error: unknown): string {
@@ -105,8 +111,8 @@ export class IpcRegistry {
     this.handle(IpcCommand.TODO_DELETE, (raw) => {
       const { id } = payloadOf<IdPayload>(raw);
       if (typeof id !== 'string') return fail('参数不完整');
-      // 删除正在计时的项前先停止，避免留下悬空 activeTimerId。
-      if (this.workTimer.getViewState().activeTodoId === id) this.workTimer.stop();
+      // 只结算并停止这一项；其它并发计时完全不受影响（无 entry 时 stop 幂等）。
+      this.workTimer.stop(id);
       this.store.deleteTodo(id);
       return ok<void>();
     });
@@ -116,13 +122,12 @@ export class IpcRegistry {
       if (typeof id !== 'string') return fail('参数不完整');
       const todo = this.store.getTodos().find((item) => item.id === id);
       if (!todo) return fail('工作项不存在或已被删除');
-      // 勾选完成时若该项正在计时：先结算并停止计时（autoMarkComplete 可能已把项置为完成）。
-      if (!todo.completed && this.workTimer.getViewState().activeTodoId === id) {
-        this.workTimer.stop();
-      }
-      // 以最新状态计算勾选结果，避免 stop() 已置 completed 后 toggle 又把它翻回去。
+      // 用户意图以「stop 之前」的快照为准：autoMarkComplete 开启时 stop 会把该项置为完成，
+      // 若在 stop 之后取反，就会把用户的勾选动作翻回未完成。
+      const nowCompleted = !todo.completed;
+      // 勾选完成 = 只停这一项并结算，其它计时继续。
+      if (nowCompleted) this.workTimer.stop(id);
       const fresh = this.store.getTodos().find((item) => item.id === id);
-      const nowCompleted = !(fresh?.completed ?? todo.completed);
       const updated = nowCompleted
         ? this.store.updateTodo(id, { completed: true, completedAt: fresh?.completedAt ?? Date.now() })
         : this.store.updateTodo(id, { completed: false, completedAt: null });
@@ -290,23 +295,27 @@ export class IpcRegistry {
       return ok<void>();
     });
 
-    // ===== 工作计时 =====
+    // ===== 工作计时（全部按 todoId 作用于单项，支持多开并发）=====
     this.handle(IpcCommand.WORK_START, (raw) => {
-      const { todoId } = payloadOf<StartWorkPayload>(raw);
-      if (typeof todoId !== 'string') return fail('参数不完整');
+      const todoId = todoIdOf(raw);
+      if (todoId === null) return fail('参数不完整');
       return this.workTimer.start(todoId);
     });
-    this.handle(IpcCommand.WORK_STOP, () => {
-      this.workTimer.stop();
-      return ok<void>();
+    this.handle(IpcCommand.WORK_STOP, (raw) => {
+      const todoId = todoIdOf(raw);
+      if (todoId === null) return fail('参数不完整');
+      return this.workTimer.stop(todoId);
     });
-    this.handle(IpcCommand.WORK_PAUSE, () => {
-      this.workTimer.pause();
-      return ok<void>();
+    this.handle(IpcCommand.WORK_STOP_ALL, () => this.workTimer.stopAll());
+    this.handle(IpcCommand.WORK_PAUSE, (raw) => {
+      const todoId = todoIdOf(raw);
+      if (todoId === null) return fail('参数不完整');
+      return this.workTimer.pause(todoId);
     });
-    this.handle(IpcCommand.WORK_RESUME, () => {
-      this.workTimer.resume();
-      return ok<void>();
+    this.handle(IpcCommand.WORK_RESUME, (raw) => {
+      const todoId = todoIdOf(raw);
+      if (todoId === null) return fail('参数不完整');
+      return this.workTimer.resume(todoId);
     });
 
     // ===== 汇总与提醒 =====

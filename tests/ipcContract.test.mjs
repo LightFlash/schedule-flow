@@ -26,10 +26,10 @@ const mainFiles = [
   'main/timers/WorkTimerEngine.ts',
 ];
 
-test('通道常量：33 命令 / 6 事件，值唯一', () => {
-  assert.equal(commands.length, 33);
+test('通道常量：34 命令 / 6 事件，值唯一', () => {
+  assert.equal(commands.length, 34);
   assert.equal(events.length, 6);
-  assert.equal(new Set(commands).size, 33);
+  assert.equal(new Set(commands).size, 34);
   assert.equal(new Set(events).size, 6);
   assert.deepEqual(Object.keys(IpcCommand).sort(), [
     'APP_VERSION',
@@ -65,6 +65,7 @@ test('通道常量：33 命令 / 6 事件，值唯一', () => {
     'WORK_RESUME',
     'WORK_START',
     'WORK_STOP',
+    'WORK_STOP_ALL',
   ]);
 });
 
@@ -119,7 +120,7 @@ test('渲染层不直接 import electron', () => {
   }
 });
 
-test('运行时：IpcRegistry 恰好注册 33 个命令，且非法汇总粒度被拒绝', async () => {
+test('运行时：IpcRegistry 恰好注册 34 个命令，且非法汇总粒度被拒绝', async () => {
   const clock = installClock(new Date(2026, 10, 19).getTime());
   qa.handlers.clear();
   const store = makeStore();
@@ -135,7 +136,7 @@ test('运行时：IpcRegistry 恰好注册 33 个命令，且非法汇总粒度�
         getState: () => ({ mode: 'standard', windows: {} }),
       },
     ).registerAll();
-    assert.equal(qa.handlers.size, 33);
+    assert.equal(qa.handlers.size, 34);
     for (const channel of commands) {
       assert.ok(qa.handlers.has(channel), `未注册命令 ${channel}`);
     }

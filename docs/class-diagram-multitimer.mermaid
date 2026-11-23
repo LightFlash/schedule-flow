@@ -1,0 +1,87 @@
+/**
+ * 增量类图（v1.0.3 工作计时多开）：只画本次变更涉及的契约与类。
+ */
+classDiagram
+    class WorkTimerEntry {
+        +string todoId
+        +ActiveTimingStatus status
+        +number|null startedAt
+        +number accumulatedBeforePauseMs
+        +number|null pauseStartedAt
+    }
+    class WorkTimerRuntime {
+        +WorkTimerEntry[] timers
+    }
+    class WorkTimerRuntimeV1 {
+        +string|null activeTimerId
+        +TimingStatus status
+        +number|null startedAt
+        +number accumulatedBeforePauseMs
+        +number|null pauseStartedAt
+    }
+    class WorkTimerEntryView {
+        +string todoId
+        +string title
+        +ActiveTimingStatus status
+        +number sessionElapsedMs
+        +number accumulatedMs
+        +number totalAccumulatedMs
+    }
+    class WorkTimerViewState {
+        +WorkTimerEntryView[] entries
+        +number totalSessionElapsedMs
+    }
+    class WorkTargetPayload {
+        +string todoId
+    }
+    class runtimeHelper {
+        <<module>>
+        +emptyWorkTimerRuntime() WorkTimerRuntime
+        +normalizeWorkTimerRuntime(raw) WorkTimerRuntime
+        +findWorkTimerEntry(rt, todoId) WorkTimerEntry
+        +sessionElapsedMsOf(entry, now) number
+    }
+    class WorkTimerEngine {
+        -StoreService store
+        +start(todoId) IpcResult~string~
+        +pause(todoId) IpcResult~void~
+        +resume(todoId) IpcResult~void~
+        +stop(todoId) IpcResult~void~
+        +stopAll() IpcResult~number~
+        +getViewState() WorkTimerViewState
+        +restore(raw) void
+        -settle(entry, now) void
+    }
+    class StoreService {
+        +saveWorkTimerRuntime(rt) void
+        +moveTodoToTimerBlockTop(id) void
+        +addTodo(title) Todo
+        +updateTodo(id, patch) Todo
+        +moveTodoToEnd(id) void
+        +moveTodoToUncompletedEnd(id) void
+    }
+    class IpcRegistry {
+        +registerAll() void
+        -handle(channel, fn) void
+    }
+    class Todo {
+        +string id
+        +number accumulatedMs
+        +number|null lastTimingAt
+        +TimingStatus timingStatus
+        +boolean completed
+    }
+
+    WorkTimerRuntime "1" o-- "*" WorkTimerEntry : timers
+    WorkTimerRuntimeV1 ..> WorkTimerRuntime : normalize 迁移
+    runtimeHelper ..> WorkTimerRuntime
+    runtimeHelper ..> WorkTimerEntry
+    WorkTimerViewState "1" o-- "*" WorkTimerEntryView : entries
+    WorkTimerEngine ..> WorkTimerRuntime : 读写
+    WorkTimerEngine ..> WorkTimerViewState : tick 输出
+    WorkTimerEngine --> StoreService : 结算/排序
+    WorkTimerEngine ..> runtimeHelper
+    StoreService "1" o-- "*" Todo : todos
+    IpcRegistry --> WorkTimerEngine : WORK_START/PAUSE/RESUME/STOP/STOP_ALL
+    IpcRegistry --> WorkTimerViewState : TickPayload.workTimer
+    WorkTargetPayload ..> WorkTimerEngine : 载荷

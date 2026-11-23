@@ -1,0 +1,41 @@
+%% 增量时序图（v1.0.3 工作计时多开）：并发开始 → 独立暂停 → 勾选完成只停该项 → 重启恢复
+sequenceDiagram
+    actor U as 用户
+    participant V as WorkTimerView / TodoView
+    participant S as useAppStore
+    participant M as IpcRegistry
+    participant E as WorkTimerEngine
+    participant D as StoreService
+
+    Note over U,D: 1) 并发开始两项
+    U->>V: 点「开始」A，再点「开始」B
+    V->>S: startWork('A') / startWork('B')
+    S->>M: invoke(workTimer:start, {todoId})
+    M->>E: start('A') / start('B')
+    E->>D: normalize 后追加 entry + updateTodo(timingStatus=running)
+    E->>D: saveWorkTimerRuntime({timers:[A,B]})
+    E->>D: moveTodoToTimerBlockTop(id) 仅首次开始
+    D-->>S: data:changed → refreshData
+    D-->>V: timer:tick(250ms) entries[] 渲染卡片
+
+    Note over U,D: 2) 暂停 A，B 不受影响；继续 A 不置顶
+    U->>V: 点 A 的「暂停」
+    V->>M: invoke(workTimer:pause, {todoId:'A'})
+    M->>E: pause('A')
+    E->>D: A 条目 accumulatedBeforePauseMs += Δ, startedAt=null, timingStatus=paused
+    U->>V: 点 A 的「继续」
+    V->>M: invoke(workTimer:resume, {todoId:'A'})
+    E->>D: A 条目 startedAt=now, pauseStartedAt=null（顺序不变）
+
+    Note over U,D: 3) 勾选完成 B：只结算 B
+    U->>V: 勾选 B
+    V->>M: invoke(todo:toggle, {id:'B'})
+    M->>E: stop('B')
+    E->>D: B.accumulatedMs += 会话, lastTimingAt, timingStatus=idle
+    M->>D: updateTodo(completed=true) + moveTodoToEnd('B')
+    E->>D: timers 过滤掉 B（A 仍在运行）
+
+    Note over U,D: 4) 重启恢复：逐条按真实时间补齐
+    M->>E: restore(store.workTimerRuntime)
+    E->>E: 逐条校验 todoId/running 缺 startedAt/已完成 → 只丢该项
+    E->>D: saveWorkTimerRuntime({timers: kept}) + 全量对齐 timingStatus

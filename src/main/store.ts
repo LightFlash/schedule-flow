@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import Store from 'electron-store';
 import { IpcEvent } from '@shared/ipcChannels';
 import { createId } from '@shared/time';
+import { emptyWorkTimerRuntime, normalizeWorkTimerRuntime } from '@shared/workTimerRuntime';
 import type { DataExportResult } from '@shared/types';
 import type {
   AppData,
@@ -65,13 +66,7 @@ export function createDefaultData(): AppData {
       phaseStartedAt: null,
       pausedRemainingMs: 0,
     },
-    workTimerRuntime: {
-      activeTimerId: null,
-      status: 'idle',
-      startedAt: null,
-      accumulatedBeforePauseMs: 0,
-      pauseStartedAt: null,
-    },
+    workTimerRuntime: emptyWorkTimerRuntime(),
     windows: {
       mode: 'standard',
       layoutVersion: LAYOUT_VERSION,
@@ -228,7 +223,8 @@ export class StoreService {
           ...(current.pomodoroRuntime?.config ?? {}),
         },
       },
-      workTimerRuntime: { ...defaults.workTimerRuntime, ...(current.workTimerRuntime ?? {}) },
+      // 运行态唯一迁移入口：v1 单计时 → v2 多条计时，累计值原样保留。
+      workTimerRuntime: normalizeWorkTimerRuntime(current.workTimerRuntime),
       windows: normalizeWindowState(
         current.windows,
         defaults.windows as WindowState,
@@ -268,14 +264,14 @@ export class StoreService {
       lastTimingAt: null,
       timingStatus: 'idle',
     };
-    // 新任务插入到「正在计时的任务」之下、其它任务之上；无计时任务时放最顶。
+    // 新任务插到「全部进行中计时项」与其余任务之间，保证计时区块完整；
+    // 无计时任务时放最顶（P1-3）。
     const todos = [...this.store.get('todos')];
-    const timingIndex = this.store
-      .get('workTimerRuntime')
-      .activeTimerId
-      ? todos.findIndex((item) => item.id === (this.store.get('workTimerRuntime').activeTimerId as string))
-      : -1;
-    const insertAt = timingIndex >= 0 ? timingIndex + 1 : 0;
+    let lastActiveIndex = -1;
+    todos.forEach((item, index) => {
+      if (item.timingStatus !== 'idle') lastActiveIndex = index;
+    });
+    const insertAt = lastActiveIndex >= 0 ? lastActiveIndex + 1 : 0;
     todos.splice(insertAt, 0, todo);
     this.store.set('todos', todos);
     this.persistAndBroadcast();
@@ -324,14 +320,21 @@ export class StoreService {
     this.persistAndBroadcast();
   }
 
-  /** 开始计时自动置顶：把指定工作项移到清单顶部。 */
-  moveTodoToTop(id: string): void {
+  /**
+   * 新开计时置顶：把指定工作项移到「计时区块」顶部，即第一个非 idle 项之前；
+   * 没有其它计时项时移到清单最顶（index 0）。暂停 / 继续 / 重复 start 均不调用此方法。
+   * 注意：调用方需先把该项 `timingStatus` 置为 running，自身因此不算「其它计时项」。
+   */
+  moveTodoToTimerBlockTop(id: string): void {
     const todos = this.store.get('todos');
     const index = todos.findIndex((todo) => todo.id === id);
-    if (index <= 0) return;
+    if (index < 0) return;
     const next = [...todos];
     const [item] = next.splice(index, 1);
-    next.unshift(item);
+    const firstActiveIndex = next.findIndex((todo) => todo.timingStatus !== 'idle');
+    const insertAt = firstActiveIndex >= 0 ? firstActiveIndex : 0;
+    if (insertAt === index) return;
+    next.splice(insertAt, 0, item);
     this.store.set('todos', next);
     this.persistAndBroadcast();
   }

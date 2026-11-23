@@ -51,11 +51,8 @@ const idlePomodoro: PomodoroViewState = {
 };
 
 const idleWorkTimer: WorkTimerViewState = {
-  status: 'idle',
-  activeTodoId: null,
-  activeTitle: '',
-  sessionElapsedMs: 0,
-  activeAccumulatedMs: 0,
+  entries: [],
+  totalSessionElapsedMs: 0,
 };
 
 const defaultMiniWindows: Record<MiniWindowKey, MiniWindowState> = {
@@ -128,11 +125,12 @@ export interface AppState {
   resetPomodoro: () => Promise<void>;
   updatePomodoroConfig: (config: PomodoroConfig) => Promise<void>;
 
-  // 工作计时
-  startWork: (todoId: string) => Promise<boolean>;
-  stopWork: () => Promise<void>;
-  pauseWork: () => Promise<void>;
-  resumeWork: () => Promise<void>;
+  // 工作计时（多开并发：每个 action 都必须指明目标工作项）
+  startWork: (todoId: string) => Promise<void>;
+  stopWork: (todoId: string) => Promise<void>;
+  stopAllWork: () => Promise<void>;
+  pauseWork: (todoId: string) => Promise<void>;
+  resumeWork: (todoId: string) => Promise<void>;
 
   // 汇总与提醒
   loadSummary: (granularity: Granularity) => Promise<void>;
@@ -464,55 +462,50 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   async startWork(todoId) {
+    // 开始 / 继续都不弹 toast：卡片与行状态即时变化本身就是反馈。
     try {
       await bridge.startWork(todoId);
       await get().refreshData();
-      get().showToast('已开始计时', 'success');
-      return true;
-    } catch (error) {
-      const message = describeError(error);
-      // 单一计时互斥：由渲染层确认后先停当前项，再启动新项（共享知识 3）。
-      if (message.includes('请先停止当前计时')) {
-        const agreed = window.confirm('已有工作项正在计时。是否停止当前项并开始新项？');
-        if (!agreed) return false;
-        try {
-          await bridge.stopWork();
-          await bridge.startWork(todoId);
-          await get().refreshData();
-          get().showToast('已切换计时对象', 'success');
-          return true;
-        } catch (switchError) {
-          get().showToast(describeError(switchError), 'error');
-          return false;
-        }
-      }
-      get().showToast(message, 'error');
-      return false;
-    }
-  },
-
-  async stopWork() {
-    try {
-      await bridge.stopWork();
-      await get().refreshData();
-      get().showToast('计时已停止，用时已累计', 'success');
     } catch (error) {
       get().showToast(describeError(error), 'error');
     }
   },
 
-  async pauseWork() {
+  async stopWork(todoId) {
     try {
-      await bridge.pauseWork();
+      await bridge.stopWork(todoId);
+      await get().refreshData();
+      get().showToast('已停止计时，用时已累计', 'success');
+    } catch (error) {
+      get().showToast(describeError(error), 'error');
+    }
+  },
+
+  async stopAllWork() {
+    try {
+      const count = await bridge.stopAllWork();
+      await get().refreshData();
+      get().showToast(
+        count > 0 ? `已停止全部 ${count} 项计时` : '当前没有进行中的计时',
+        count > 0 ? 'success' : 'info',
+      );
+    } catch (error) {
+      get().showToast(describeError(error), 'error');
+    }
+  },
+
+  async pauseWork(todoId) {
+    try {
+      await bridge.pauseWork(todoId);
       await get().refreshData();
     } catch (error) {
       get().showToast(describeError(error), 'error');
     }
   },
 
-  async resumeWork() {
+  async resumeWork(todoId) {
     try {
-      await bridge.resumeWork();
+      await bridge.resumeWork(todoId);
       await get().refreshData();
     } catch (error) {
       get().showToast(describeError(error), 'error');

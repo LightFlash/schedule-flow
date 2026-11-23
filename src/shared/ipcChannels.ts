@@ -37,9 +37,10 @@ export const IpcCommand = {
   POMODORO_RESUME: 'pomodoro:resume',
   POMODORO_RESET: 'pomodoro:reset',
   POMODORO_CONFIG: 'pomodoro:updateConfig',
-  // 工作计时
+  // 工作计时（全部按 todoId 作用于单项，支持多开并发）
   WORK_START: 'workTimer:start',
   WORK_STOP: 'workTimer:stop',
+  WORK_STOP_ALL: 'workTimer:stopAll',
   WORK_PAUSE: 'workTimer:pause',
   WORK_RESUME: 'workTimer:resume',
   // 汇总与提醒

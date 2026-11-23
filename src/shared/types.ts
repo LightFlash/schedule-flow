@@ -93,7 +93,32 @@ export interface PomodoroRuntime {
   pausedRemainingMs: number;
 }
 
+/** 活动计时状态：idle 不在运行态里出现，任何 entry 只能是 running / paused。 */
+export type ActiveTimingStatus = Exclude<TimingStatus, 'idle'>;
+
+/**
+ * 单条工作计时会话（持久化，支持崩溃恢复）。一个 todoId 最多一条。
+ * 会话用时唯一公式：running → accumulatedBeforePauseMs + max(0, now - startedAt)；
+ * paused → accumulatedBeforePauseMs。禁止用定时器累加。
+ */
+export interface WorkTimerEntry {
+  todoId: string;
+  status: ActiveTimingStatus;
+  /** 本次 running 段起点；paused 时为 null。 */
+  startedAt: number | null;
+  /** 本次会话「暂停前」已累计毫秒；暂停期间冻结。 */
+  accumulatedBeforePauseMs: number;
+  /** 暂停时刻，仅诊断与恢复兜底，不参与结算算术。 */
+  pauseStartedAt: number | null;
+}
+
+/** v2 运行态：多条计时并存的唯一权威数据源；数组顺序无业务含义（渲染按清单顺序）。 */
 export interface WorkTimerRuntime {
+  timers: WorkTimerEntry[];
+}
+
+/** v1.0.2 遗留的单计时运行态，仅在 store 迁移与恢复旧备份时读取。 */
+export interface WorkTimerRuntimeV1 {
   activeTimerId: string | null;
   status: TimingStatus;
   startedAt: number | null;
@@ -124,12 +149,23 @@ export interface PomodoroViewState {
   config: PomodoroConfig;
 }
 
-export interface WorkTimerViewState {
-  status: TimingStatus;
-  activeTodoId: string | null;
-  activeTitle: string;
+/** 单条进行中计时的视图数据（渲染层直接显示，不再自行推算时长）。 */
+export interface WorkTimerEntryView {
+  todoId: string;
+  title: string;
+  status: ActiveTimingStatus;
+  /** 本次会话用时。 */
   sessionElapsedMs: number;
-  activeAccumulatedMs: number;
+  /** 历史累计（不含本次）。 */
+  accumulatedMs: number;
+  /** 两者之和，供「累计 X」直接渲染。 */
+  totalAccumulatedMs: number;
+}
+
+/** 工作计时视图态：进行中项数组，顺序与 TODO 清单一致。 */
+export interface WorkTimerViewState {
+  entries: WorkTimerEntryView[];
+  totalSessionElapsedMs: number;
 }
 
 // ===== 汇总 =====
@@ -253,7 +289,8 @@ export interface TestPushPayload {
   settings?: Settings;
 }
 
-export interface StartWorkPayload {
+/** 工作计时命令统一载荷：所有命令都必须指明作用于哪一项。 */
+export interface WorkTargetPayload {
   todoId: string;
 }
 

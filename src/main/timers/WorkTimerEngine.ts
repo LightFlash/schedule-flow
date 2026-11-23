@@ -1,162 +1,264 @@
 /**
- * 工作计时引擎（主进程权威）。
- * 状态机 idle → running ⇄ paused → idle；全局单一 activeTimerId 保证同一时刻仅一项计时。
- * running 以 startedAt（与暂停前累计）为准，paused 以 accumulatedBeforePauseMs 为准；
- * 每次状态转换立即持久化，崩溃后按 Date.now() 真实经过时间恢复。
+ * 工作计时引擎（主进程权威，支持多任务并发计时）。
+ *
+ * 每条 entry 独立状态机：idle → running ⇄ paused → idle，互不影响。
+ * 权威数据只在 runtime（时间戳），`Todo.timingStatus` 是镜像，每次状态转换同步写入。
+ * 不变式：`todo.timingStatus !== 'idle'` ⟺ runtime 中存在该 todoId 的 entry 且状态一致。
+ *
+ * 会话用时只由 `startedAt / accumulatedBeforePauseMs` 推导（见 shared/workTimerRuntime），
+ * 任何情况下都不靠定时器累加，因此崩溃恢复后按 Date.now() 真实经过时间自然补齐。
  */
 
-import type { IpcResult, WorkTimerRuntime, WorkTimerViewState } from '@shared/types';
+import {
+  emptyWorkTimerRuntime,
+  findWorkTimerEntry,
+  normalizeWorkTimerRuntime,
+  sessionElapsedMsOf,
+  timingStatusOf,
+} from '@shared/workTimerRuntime';
+import type {
+  IpcResult,
+  TimingStatus,
+  Todo,
+  WorkTimerEntry,
+  WorkTimerEntryView,
+  WorkTimerRuntime,
+  WorkTimerRuntimeV1,
+  WorkTimerViewState,
+} from '@shared/types';
 import type { StoreService } from '../store';
-
-function emptyRuntime(): WorkTimerRuntime {
-  return {
-    activeTimerId: null,
-    status: 'idle',
-    startedAt: null,
-    accumulatedBeforePauseMs: 0,
-    pauseStartedAt: null,
-  };
-}
 
 export class WorkTimerEngine {
   constructor(private readonly store: StoreService) {}
 
-  /** 开始 / 继续指定工作项。若已有其它计时项，返回 ok:false 交渲染层确认先停后启。 */
+  /**
+   * 开始 / 继续指定工作项。
+   * - 无 entry：新建一条并「新开置顶」（仅 idle → running 的首次开始才置顶）；
+   * - paused：等价于继续，累计保留，**不置顶**；
+   * - running：幂等空操作，不重置 startedAt、不产生第二条会话。
+   */
   start(todoId: string): IpcResult<string> {
-    const todos = this.store.getTodos();
-    const todo = todos.find((item) => item.id === todoId);
+    const todo = this.store.getTodos().find((item) => item.id === todoId);
     if (!todo) return { ok: false, message: '工作项不存在或已被删除' };
+    if (todo.completed) return { ok: false, message: '已完成的工作项不可计时' };
 
-    const runtime = this.store.getAppData().workTimerRuntime;
-    if (runtime.activeTimerId !== null && runtime.activeTimerId !== todoId) {
-      return { ok: false, message: '请先停止当前计时' };
+    const runtime = this.readRuntime();
+    const existing = findWorkTimerEntry(runtime, todoId);
+    if (existing !== undefined && existing.status === 'running') {
+      return { ok: true, message: '该项正在计时中' };
     }
-    if (runtime.activeTimerId === todoId && runtime.status === 'running') {
-      return { ok: false, message: '该项正在计时中' };
-    }
-    if (runtime.activeTimerId === todoId && runtime.status === 'paused') {
-      this.resume();
+    if (existing !== undefined && existing.status === 'paused') {
+      this.resume(todoId);
       return { ok: true, message: '已继续计时' };
     }
 
-    this.store.saveWorkTimerRuntime({
-      activeTimerId: todoId,
+    const now = Date.now();
+    const entry: WorkTimerEntry = {
+      todoId,
       status: 'running',
-      startedAt: Date.now(),
+      startedAt: now,
       accumulatedBeforePauseMs: 0,
       pauseStartedAt: null,
-    });
+    };
+    this.saveRuntime({ timers: [...runtime.timers, entry] });
     this.store.updateTodo(todoId, { timingStatus: 'running' });
-    // 开始计时的工作项自动置顶，方便随时看到当前专注对象。
-    this.store.moveTodoToTop(todoId);
+    // 新开计时自动置顶（移到计时区块最上方），其它项相对顺序不变。
+    this.store.moveTodoToTimerBlockTop(todoId);
     return { ok: true, message: '已开始计时' };
   }
 
-  /** 停止：本次时长累加到 TODO，最后计时时间写为当前时刻，清空运行态。 */
-  stop(): void {
-    const runtime = this.store.getAppData().workTimerRuntime;
-    if (runtime.activeTimerId === null) {
-      this.store.saveWorkTimerRuntime(emptyRuntime());
-      return;
+  /** 暂停指定项；非 running（含目标已消失）幂等成功，不影响其它计时。 */
+  pause(todoId: string): IpcResult<void> {
+    const runtime = this.readRuntime();
+    const entry = findWorkTimerEntry(runtime, todoId);
+    if (entry === undefined || entry.status !== 'running') return { ok: true };
+    if (!this.hasTodo(todoId)) {
+      // 悬空 entry：静默清理，避免留下永远无法结算的运行态。
+      this.saveRuntime({ timers: runtime.timers.filter((item) => item.todoId !== todoId) });
+      return { ok: true };
     }
 
-    const sessionMs = this.sessionElapsedMs(runtime);
     const now = Date.now();
-    const autoMarkComplete = this.store.getSettings().autoMarkComplete;
-    const todo = this.store.getTodos().find((item) => item.id === runtime.activeTimerId);
-
-    if (todo) {
-      const patch = {
-        accumulatedMs: todo.accumulatedMs + sessionMs,
-        lastTimingAt: now,
-        timingStatus: 'idle' as const,
-        ...(autoMarkComplete ? { completed: true, completedAt: now } : {}),
-      };
-      this.store.updateTodo(todo.id, patch);
-      // 开启 autoMarkComplete 停止即完成时，同样自动沉底，与勾选完成行为一致。
-      if (autoMarkComplete) this.store.moveTodoToEnd(todo.id);
-    }
-
-    this.store.saveWorkTimerRuntime(emptyRuntime());
-  }
-
-  pause(): void {
-    const runtime = this.store.getAppData().workTimerRuntime;
-    if (runtime.status !== 'running' || runtime.startedAt === null || runtime.activeTimerId === null) {
-      return;
-    }
-    const now = Date.now();
-    this.store.saveWorkTimerRuntime({
-      ...runtime,
+    const paused: WorkTimerEntry = {
+      ...entry,
       status: 'paused',
       startedAt: null,
-      accumulatedBeforePauseMs:
-        runtime.accumulatedBeforePauseMs + Math.max(0, now - runtime.startedAt),
+      accumulatedBeforePauseMs: Math.max(0, sessionElapsedMsOf(entry, now)),
       pauseStartedAt: now,
-    });
-    this.store.updateTodo(runtime.activeTimerId, { timingStatus: 'paused' });
+    };
+    this.saveRuntime(this.replaceEntry(runtime, paused));
+    this.store.updateTodo(todoId, { timingStatus: 'paused' });
+    return { ok: true };
   }
 
-  resume(): void {
-    const runtime = this.store.getAppData().workTimerRuntime;
-    if (runtime.status !== 'paused' || runtime.activeTimerId === null) return;
-    this.store.saveWorkTimerRuntime({
-      ...runtime,
+  /** 继续指定项；非 paused（含目标已消失）幂等成功，不改变清单顺序。 */
+  resume(todoId: string): IpcResult<void> {
+    const runtime = this.readRuntime();
+    const entry = findWorkTimerEntry(runtime, todoId);
+    if (entry === undefined || entry.status !== 'paused') return { ok: true };
+    if (!this.hasTodo(todoId)) {
+      this.saveRuntime({ timers: runtime.timers.filter((item) => item.todoId !== todoId) });
+      return { ok: true };
+    }
+
+    const resumed: WorkTimerEntry = {
+      ...entry,
       status: 'running',
       startedAt: Date.now(),
       pauseStartedAt: null,
-    });
-    this.store.updateTodo(runtime.activeTimerId, { timingStatus: 'running' });
+    };
+    this.saveRuntime(this.replaceEntry(runtime, resumed));
+    this.store.updateTodo(todoId, { timingStatus: 'running' });
+    return { ok: true };
   }
 
-  /** 供 250ms tick 使用的视图态。 */
-  getViewState(): WorkTimerViewState {
-    const runtime = this.store.getAppData().workTimerRuntime;
-    const todos = this.store.getTodos();
-    const todo = todos.find((item) => item.id === runtime.activeTimerId);
-    return {
-      status: runtime.status,
-      activeTodoId: runtime.activeTimerId,
-      activeTitle: runtime.activeTimerId === null ? '' : todo?.title ?? '（工作项已删除）',
-      sessionElapsedMs: this.sessionElapsedMs(runtime),
-      activeAccumulatedMs: todo?.accumulatedMs ?? 0,
-    };
+  /** 停止指定项并结算：累计用时写回 TODO，清空该项运行态；其它计时完全不受影响。 */
+  stop(todoId: string): IpcResult<void> {
+    const runtime = this.readRuntime();
+    const entry = findWorkTimerEntry(runtime, todoId);
+    if (entry === undefined) return { ok: true };
+
+    this.saveRuntime({ timers: runtime.timers.filter((item) => item.todoId !== todoId) });
+    this.settle(entry, Date.now());
+    return { ok: true };
+  }
+
+  /** 全部停止：逐条结算，返回实际结算条数（0 = 本来没有计时）。 */
+  stopAll(): IpcResult<number> {
+    const runtime = this.readRuntime();
+    const entries = runtime.timers;
+    if (entries.length === 0) return { ok: true, data: 0 };
+
+    // 先一次性清空运行态，再逐条结算：即使中途某条目标已消失，也不会残留运行态。
+    this.saveRuntime(emptyWorkTimerRuntime());
+    const now = Date.now();
+    for (const entry of entries) this.settle(entry, now);
+    return { ok: true, data: entries.length };
   }
 
   /**
-   * 启动恢复：校验运行态合法性；running 场景由 startedAt 直接得到真实经过时间，
-   * paused 场景使用暂停前累计值。非法或指向已删工作项的运行态被重置为空闲。
+   * 供 250ms tick 与首屏共用的视图态：按 TODO 清单顺序输出进行中项。
+   * runtime 中指向已删除工作项的条目不会出现在视图里（restore 会清理）。
    */
-  restore(runtime: WorkTimerRuntime): void {
+  getViewState(): WorkTimerViewState {
+    const runtime = this.readRuntime();
     const todos = this.store.getTodos();
-    const hasTodo = runtime.activeTimerId !== null && todos.some((t) => t.id === runtime.activeTimerId);
-    const runningWithoutStart = runtime.status === 'running' && runtime.startedAt === null;
+    const now = Date.now();
+    const byTodoId = new Map(runtime.timers.map((entry) => [entry.todoId, entry]));
+    const entries: WorkTimerEntryView[] = [];
+    let totalSessionElapsedMs = 0;
 
-    if (!hasTodo || runningWithoutStart) {
-      for (const todo of todos) {
-        if (todo.timingStatus !== 'idle') this.store.updateTodo(todo.id, { timingStatus: 'idle' });
-      }
-      this.store.saveWorkTimerRuntime(emptyRuntime());
-      return;
+    for (const todo of todos) {
+      const entry = byTodoId.get(todo.id);
+      if (entry === undefined) continue;
+      const sessionElapsedMs = sessionElapsedMsOf(entry, now);
+      entries.push({
+        todoId: todo.id,
+        title: todo.title,
+        status: entry.status,
+        sessionElapsedMs,
+        accumulatedMs: todo.accumulatedMs,
+        totalAccumulatedMs: todo.accumulatedMs + sessionElapsedMs,
+      });
+      totalSessionElapsedMs += sessionElapsedMs;
     }
 
-    const next: WorkTimerRuntime = {
-      ...runtime,
-      accumulatedBeforePauseMs: Math.max(0, runtime.accumulatedBeforePauseMs),
-      pauseStartedAt: runtime.status === 'paused' ? runtime.pauseStartedAt ?? Date.now() : null,
-    };
-    this.store.saveWorkTimerRuntime(next);
-    this.store.updateTodo(runtime.activeTimerId as string, { timingStatus: next.status });
+    return { entries, totalSessionElapsedMs };
   }
 
-  /** 本次会话已计时毫秒（不含历史累计）；沿用绝对时间戳，不依赖定时器累加。 */
-  private sessionElapsedMs(runtime: WorkTimerRuntime): number {
-    if (runtime.status === 'running' && runtime.startedAt !== null) {
-      return Math.max(0, runtime.accumulatedBeforePauseMs + (Date.now() - runtime.startedAt));
+  /**
+   * 启动恢复 / 导入恢复（幂等）：逐条校验，坏条目只丢自己，不牵连其它。
+   * - 悬空 todoId、已完成工作项、running 缺 startedAt → 丢弃该条；
+   * - running 用真实经过时间（含程序关闭期间），未来时间戳收敛为 now；
+   * - paused 用暂停前累计值，缺 pauseStartedAt 时补 now；
+   * - 最后按清单顺序重排 runtime，并把 `Todo.timingStatus` 全量对齐。
+   */
+  restore(raw: WorkTimerRuntime | WorkTimerRuntimeV1 | null): void {
+    const runtime = normalizeWorkTimerRuntime(raw);
+    const todos = this.store.getTodos();
+    const byTodoId = new Map(todos.map((todo) => [todo.id, todo]));
+    const now = Date.now();
+    const seen = new Set<string>();
+    const kept: WorkTimerEntry[] = [];
+
+    for (const entry of runtime.timers) {
+      const todo = byTodoId.get(entry.todoId);
+      if (todo === undefined || todo.completed) continue;
+      if (seen.has(entry.todoId)) continue;
+      seen.add(entry.todoId);
+
+      if (entry.status === 'running') {
+        if (entry.startedAt === null) continue;
+        kept.push({
+          ...entry,
+          startedAt: Math.min(entry.startedAt, now),
+          accumulatedBeforePauseMs: Math.max(0, entry.accumulatedBeforePauseMs),
+          pauseStartedAt: null,
+        });
+      } else {
+        kept.push({
+          ...entry,
+          startedAt: null,
+          accumulatedBeforePauseMs: Math.max(0, entry.accumulatedBeforePauseMs),
+          pauseStartedAt: entry.pauseStartedAt ?? now,
+        });
+      }
     }
-    if (runtime.status === 'paused') {
-      return Math.max(0, runtime.accumulatedBeforePauseMs);
+
+    // 顺序与清单对齐（runtime 顺序无业务含义，仅保持稳定便于调试）。
+    const orderIndex = new Map(todos.map((todo, index) => [todo.id, index]));
+    kept.sort(
+      (left, right) => (orderIndex.get(left.todoId) ?? 0) - (orderIndex.get(right.todoId) ?? 0),
+    );
+    this.saveRuntime({ timers: kept });
+
+    const keptByTodoId = new Map(kept.map((entry) => [entry.todoId, entry]));
+    for (const todo of todos) {
+      const want: TimingStatus = timingStatusOf(keptByTodoId.get(todo.id));
+      if (todo.timingStatus !== want) this.store.updateTodo(todo.id, { timingStatus: want });
     }
-    return 0;
+  }
+
+  // ===== 内部工具 =====
+
+  /** 读取运行态并归一化：即使 config.json 被外部改坏也不会让引擎崩掉。 */
+  private readRuntime(): WorkTimerRuntime {
+    return normalizeWorkTimerRuntime(this.store.getAppData().workTimerRuntime);
+  }
+
+  private saveRuntime(runtime: WorkTimerRuntime): void {
+    this.store.saveWorkTimerRuntime({ timers: runtime.timers.map((entry) => ({ ...entry })) });
+  }
+
+  private replaceEntry(runtime: WorkTimerRuntime, next: WorkTimerEntry): WorkTimerRuntime {
+    return {
+      timers: runtime.timers.map((entry) => (entry.todoId === next.todoId ? next : entry)),
+    };
+  }
+
+  private hasTodo(todoId: string): boolean {
+    return this.store.getTodos().some((todo) => todo.id === todoId);
+  }
+
+  /**
+   * 单条结算：`accumulatedMs += 本次会话`、写 `lastTimingAt`、`timingStatus=idle`；
+   * autoMarkComplete 只对触发结算的这一项生效并沉底。
+   */
+  private settle(entry: WorkTimerEntry, now: number): void {
+    const todo: Todo | undefined = this.store
+      .getTodos()
+      .find((item) => item.id === entry.todoId);
+    if (todo === undefined) return;
+
+    const sessionMs = sessionElapsedMsOf(entry, now);
+    const autoMarkComplete = this.store.getSettings().autoMarkComplete;
+    this.store.updateTodo(todo.id, {
+      accumulatedMs: todo.accumulatedMs + sessionMs,
+      lastTimingAt: now,
+      timingStatus: 'idle',
+      ...(autoMarkComplete ? { completed: true, completedAt: now } : {}),
+    });
+    // 开启 autoMarkComplete 时停止即完成，与勾选完成行为一致地沉底。
+    if (autoMarkComplete) this.store.moveTodoToEnd(todo.id);
   }
 }

@@ -1,15 +1,20 @@
 /**
- * 工作计时视图：对象选择、大号计时（本次 + 累计）、启停 / 暂停继续、计时列表。
- * 计时视图态来自主进程 tick，切换视图不中断。
+ * 工作计时视图（多开并发版）。
+ *
+ * 结构：标题 + 「进行中 N 项 · 本次合计」汇总 → 新增计时入口（下拉只列未完成且未计时的项）
+ *      → 进行中计时卡片列表（每条独立暂停 / 继续 / 停止，见 WorkTimerActiveList）
+ *      → 工作项用时列表（累计用时查看 + 删除入口）。
+ * 计时视图态全部来自主进程 tick，切换视图不中断；本视图不自行推算时长。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import {
   Box,
   Button,
   Chip,
   FormControl,
+  FormHelperText,
   IconButton,
   InputLabel,
   List,
@@ -27,6 +32,7 @@ import type { TimingStatus, Todo } from '@shared/types';
 import { useAppStore } from '../store/useAppStore';
 import LucideIcon from '../components/LucideIcon';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
+import WorkTimerActiveList from '../components/WorkTimerActiveList';
 
 const STATUS_LABEL: Record<TimingStatus, string> = {
   idle: '未开始',
@@ -36,134 +42,94 @@ const STATUS_LABEL: Record<TimingStatus, string> = {
 
 export default function WorkTimerView(): ReactElement {
   const todos = useAppStore((state) => state.todos);
-  const workTimer = useAppStore((state) => state.workTimer);
+  const entries = useAppStore((state) => state.workTimer.entries);
+  const totalSessionElapsedMs = useAppStore((state) => state.workTimer.totalSessionElapsedMs);
   const startWork = useAppStore((state) => state.startWork);
-  const stopWork = useAppStore((state) => state.stopWork);
-  const pauseWork = useAppStore((state) => state.pauseWork);
-  const resumeWork = useAppStore((state) => state.resumeWork);
 
   const [selectedId, setSelectedId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Todo | null>(null);
 
-  useEffect(() => {
-    if (workTimer.activeTodoId) {
-      setSelectedId(workTimer.activeTodoId);
-    } else if (selectedId === '' && todos.length > 0) {
-      setSelectedId(todos[0].id);
-    }
-  }, [workTimer.activeTodoId, selectedId, todos]);
+  // 新增计时入口只列「未完成且未计时」的项：已在跑的项由卡片列表控制，不重复出现在下拉里。
+  const startableTodos = useMemo(
+    () => todos.filter((todo) => !todo.completed && todo.timingStatus === 'idle'),
+    [todos],
+  );
 
-  // 选中的工作项被删除后清空选择，避免 Select 悬空。
+  // 选中的项开始计时后（或被打勾完成 / 删除）就不再可选，自动回退到第一个可选项。
   useEffect(() => {
-    if (selectedId !== '' && !todos.some((todo) => todo.id === selectedId)) {
-      setSelectedId('');
-    }
-  }, [todos, selectedId]);
-
-  const isActiveItem = workTimer.activeTodoId !== null && workTimer.activeTodoId === selectedId;
-  const displayTitle = isActiveItem ? workTimer.activeTitle : todos.find((t) => t.id === selectedId)?.title ?? '';
+    if (startableTodos.some((todo) => todo.id === selectedId)) return;
+    setSelectedId(startableTodos[0]?.id ?? '');
+  }, [startableTodos, selectedId]);
 
   const handleStart = (): void => {
-    if (selectedId) void startWork(selectedId);
+    if (selectedId === '') return;
+    void startWork(selectedId);
   };
+
+  const runningCount = entries.length;
 
   return (
     <Box sx={{ maxWidth: 960, mx: 'auto' }}>
-      <Paper sx={{ p: 3.5, mb: 3 }}>
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
-          <FormControl sx={{ minWidth: 260 }}>
-            <InputLabel id="work-todo-select-label">计时对象</InputLabel>
+      <Paper sx={{ p: 2.5, mb: 2.5 }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          spacing={2}
+          sx={{ mb: 2 }}
+        >
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            工作计时
+          </Typography>
+          {runningCount > 0 && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ fontVariantNumeric: 'tabular-nums' }}
+            >
+              <Box component="span" sx={{ color: 'primary.main', mr: 0.5 }}>
+                ●
+              </Box>
+              进行中 {runningCount} 项 · 本次合计 {formatClock(totalSessionElapsedMs)}
+            </Typography>
+          )}
+        </Stack>
+
+        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+          <FormControl sx={{ minWidth: 260, flex: 1 }} size="small">
+            <InputLabel id="work-todo-select-label">选择工作项</InputLabel>
             <Select
               labelId="work-todo-select-label"
-              label="计时对象"
+              label="选择工作项"
               value={selectedId}
               onChange={(event) => setSelectedId(event.target.value)}
+              disabled={startableTodos.length === 0}
             >
-              {todos.map((todo) => (
+              {startableTodos.map((todo) => (
                 <MenuItem key={todo.id} value={todo.id}>
                   {todo.title}
                 </MenuItem>
               ))}
             </Select>
+            {startableTodos.length === 0 && (
+              <FormHelperText>未完成工作项均已在进行中</FormHelperText>
+            )}
           </FormControl>
-          <Chip
-            label={STATUS_LABEL[isActiveItem ? workTimer.status : 'idle']}
-            color={isActiveItem && workTimer.status === 'running' ? 'primary' : 'default'}
-            variant="outlined"
-          />
-          {workTimer.status !== 'idle' && !isActiveItem && (
-            <Typography variant="caption" color="warning.main">
-              当前有其它工作项正在计时
-            </Typography>
-          )}
-        </Stack>
-
-        <Box sx={{ textAlign: 'center', py: 2 }}>
-          <Typography variant="h2" component="div" sx={{ fontWeight: 700, letterSpacing: 2 }}>
-            {formatClock(workTimer.sessionElapsedMs)}
-          </Typography>
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            {displayTitle || '未选择工作项'} · 本次用时
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            累计用时 {formatDuration(workTimer.activeAccumulatedMs + (isActiveItem ? workTimer.sessionElapsedMs : 0))}
-          </Typography>
-        </Box>
-
-        <Stack direction="row" spacing={2} justifyContent="center" alignItems="center" sx={{ mt: 3 }}>
-          {(!isActiveItem || workTimer.status === 'idle') && (
-            <Button
-              variant="contained"
-              startIcon={<LucideIcon name="play" size={16} />}
-              onClick={handleStart}
-              disabled={selectedId === ''}
-            >
-              开始
-            </Button>
-          )}
-          {isActiveItem && workTimer.status === 'running' && (
-            <>
-              <Button
-                variant="contained"
-                color="warning"
-                startIcon={<LucideIcon name="pause" size={16} />}
-                onClick={() => void pauseWork()}
-              >
-                暂停
-              </Button>
-              <Tooltip title="停止并结算用时">
-                <IconButton
-                  aria-label="停止并结算用时"
-                  onClick={() => void stopWork()}
-                  sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#FEF2F2', color: 'error.main', '&:hover': { bgcolor: '#FEE2E2' } }}
-                >
-                  <LucideIcon name="square" size={16} />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
-          {isActiveItem && workTimer.status === 'paused' && (
-            <>
-              <Button
-                variant="contained"
-                startIcon={<LucideIcon name="play" size={16} />}
-                onClick={() => void resumeWork()}
-              >
-                继续
-              </Button>
-              <Tooltip title="停止并结算用时">
-                <IconButton
-                  aria-label="停止并结算用时"
-                  onClick={() => void stopWork()}
-                  sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: '#FEF2F2', color: 'error.main', '&:hover': { bgcolor: '#FEE2E2' } }}
-                >
-                  <LucideIcon name="square" size={16} />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
+          <Button
+            variant="contained"
+            startIcon={<LucideIcon name="play" size={16} />}
+            onClick={handleStart}
+            disabled={startableTodos.length === 0 || selectedId === ''}
+            sx={{ whiteSpace: 'nowrap', minWidth: 112, height: 40 }}
+          >
+            开始计时
+          </Button>
         </Stack>
       </Paper>
+
+      <Box sx={{ mb: 2.5 }}>
+        <WorkTimerActiveList />
+      </Box>
 
       <Paper sx={{ p: 2 }}>
         <Typography variant="h6" sx={{ mb: 1 }}>
@@ -173,31 +139,33 @@ export default function WorkTimerView(): ReactElement {
           <Typography color="text.secondary">暂无工作项。</Typography>
         ) : (
           <List disablePadding>
-            {todos.map((todo) => {
-              const active = workTimer.activeTodoId === todo.id;
-              return (
-                <ListItem key={todo.id} divider disableGutters>
-                  <ListItemText primary={todo.title} secondary={`累计 ${formatDuration(todo.accumulatedMs)}`} />
-                  <Chip
+            {todos.map((todo) => (
+              <ListItem key={todo.id} divider disableGutters>
+                <ListItemText
+                  primary={todo.title}
+                  secondary={`累计 ${formatDuration(todo.accumulatedMs)}`}
+                />
+                <Chip
+                  size="small"
+                  label={todo.completed ? '已完成' : STATUS_LABEL[todo.timingStatus]}
+                  color={
+                    todo.completed ? 'success' : todo.timingStatus === 'running' ? 'primary' : 'default'
+                  }
+                  variant="outlined"
+                  sx={{ mr: 1 }}
+                />
+                <Tooltip title="删除这条工作项">
+                  <IconButton
                     size="small"
-                    label={active ? STATUS_LABEL[workTimer.status] : STATUS_LABEL[todo.timingStatus]}
-                    color={active && workTimer.status === 'running' ? 'primary' : 'default'}
-                    variant="outlined"
-                    sx={{ mr: 1 }}
-                  />
-                  <Tooltip title="删除这条工作项">
-                    <IconButton
-                      size="small"
-                      aria-label={`删除工作项「${todo.title}」`}
-                      onClick={() => setDeleteTarget(todo)}
-                      sx={{ color: '#94A3B8', '&:hover': { bgcolor: '#FEF2F2', color: 'error.main' } }}
-                    >
-                      <LucideIcon name="trash" size={16} />
-                    </IconButton>
-                  </Tooltip>
-                </ListItem>
-              );
-            })}
+                    aria-label={`删除工作项「${todo.title}」`}
+                    onClick={() => setDeleteTarget(todo)}
+                    sx={{ color: '#94A3B8', '&:hover': { bgcolor: '#FEF2F2', color: 'error.main' } }}
+                  >
+                    <LucideIcon name="trash" size={16} />
+                  </IconButton>
+                </Tooltip>
+              </ListItem>
+            ))}
           </List>
         )}
       </Paper>

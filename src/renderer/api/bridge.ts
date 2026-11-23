@@ -34,6 +34,7 @@ import type {
   WindowKeyPayload,
   WindowPinnedPayload,
   WindowState,
+  WorkTargetPayload,
 } from '@shared/types';
 
 function getApi(): ElectronApi {
@@ -113,12 +114,17 @@ export const bridge = {
   updatePomodoroConfig: (config: PomodoroConfig): Promise<void> =>
     invoke<void>(IpcCommand.POMODORO_CONFIG, { config } satisfies ConfigUpdatePayload),
 
-  // 工作计时
+  // 工作计时（全部命令都指明作用于哪一项，支持多开并发）
   startWork: (todoId: string): Promise<string> =>
-    invoke<string>(IpcCommand.WORK_START, { todoId }),
-  stopWork: (): Promise<void> => invoke<void>(IpcCommand.WORK_STOP),
-  pauseWork: (): Promise<void> => invoke<void>(IpcCommand.WORK_PAUSE),
-  resumeWork: (): Promise<void> => invoke<void>(IpcCommand.WORK_RESUME),
+    invoke<string>(IpcCommand.WORK_START, { todoId } satisfies WorkTargetPayload),
+  stopWork: (todoId: string): Promise<void> =>
+    invoke<void>(IpcCommand.WORK_STOP, { todoId } satisfies WorkTargetPayload),
+  /** 全部停止：返回实际结算条数（0 表示本来没有计时）。 */
+  stopAllWork: (): Promise<number> => invoke<number>(IpcCommand.WORK_STOP_ALL),
+  pauseWork: (todoId: string): Promise<void> =>
+    invoke<void>(IpcCommand.WORK_PAUSE, { todoId } satisfies WorkTargetPayload),
+  resumeWork: (todoId: string): Promise<void> =>
+    invoke<void>(IpcCommand.WORK_RESUME, { todoId } satisfies WorkTargetPayload),
 
   // 汇总与提醒
   loadSummary: (granularity: Granularity): Promise<Summary> =>

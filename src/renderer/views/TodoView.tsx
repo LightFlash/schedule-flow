@@ -22,7 +22,7 @@ import {
   Typography,
 } from '@mui/material';
 import { formatDuration } from '@shared/time';
-import type { Todo, TimingStatus } from '@shared/types';
+import type { Todo, TimingStatus, WorkTimerEntryView } from '@shared/types';
 import { useAppStore } from '../store/useAppStore';
 import { stripHtml } from '../utils/text';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
@@ -158,13 +158,14 @@ function SortableRow({ index, totalCount, onMove, onCommit, children }: Sortable
 
 interface TodoRowProps {
   todo: Todo;
-  isActive: boolean;
+  /** 本行对应的进行中计时（多开并发：每行只看自己的 entry，无则为 undefined）。 */
+  entry?: WorkTimerEntryView;
   compact: boolean;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
 }
 
-function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = false }: TodoRowProps): ReactElement {
+function TodoRow({ todo, entry, compact, canMoveUp = false, canMoveDown = false }: TodoRowProps): ReactElement {
   const toggleTodo = useAppStore((state) => state.toggleTodo);
   const moveTodo = useAppStore((state) => state.moveTodo);
   const updateTodo = useAppStore((state) => state.updateTodo);
@@ -172,20 +173,17 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
   const pauseWork = useAppStore((state) => state.pauseWork);
   const resumeWork = useAppStore((state) => state.resumeWork);
   const stopWork = useAppStore((state) => state.stopWork);
-  const workTimer = useAppStore((state) => state.workTimer);
 
-  // 累计用时实时化：accumulatedMs 只在停止时落库，运行/暂停期间叠加 tick 广播的会话时长。
-  const liveAccumulatedMs =
-    isActive && (workTimer.status === 'running' || workTimer.status === 'paused')
-      ? todo.accumulatedMs + workTimer.sessionElapsedMs
-      : todo.accumulatedMs;
+  // 实时累计：accumulatedMs 只在停止时落库，运行/暂停期间直接用主进程算好的总累计。
+  const liveAccumulatedMs = entry?.totalAccumulatedMs ?? todo.accumulatedMs;
 
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(todo.title);
   const [noteAnchor, setNoteAnchor] = useState<HTMLElement | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const status: TimingStatus = todo.timingStatus;
+  // 行状态只来自本行的计时条目，不再受"其它项是否在计时"影响。
+  const status: TimingStatus = entry?.status ?? todo.timingStatus;
   const hasNote = todo.notes.trim().length > 0 && stripHtml(todo.notes).length > 0;
 
   const saveTitle = (): void => {
@@ -200,7 +198,7 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
   };
 
   const handlePlay = (): void => {
-    if (status === 'paused') void resumeWork();
+    if (status === 'paused') void resumeWork(todo.id);
     else void startWork(todo.id);
   };
 
@@ -261,8 +259,8 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
         {!compact && (
           <Chip
             size="small"
-            label={todo.completed ? '已完成' : isActive || status === 'running' ? '计时中' : STATUS_LABEL[status]}
-            color={todo.completed ? 'success' : isActive || status === 'running' ? 'primary' : 'default'}
+            label={todo.completed ? '已完成' : STATUS_LABEL[status]}
+            color={todo.completed ? 'success' : status === 'running' ? 'primary' : 'default'}
             variant="outlined"
             sx={{ mx: 1 }}
           />
@@ -306,7 +304,7 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
                 size={compact ? 'small' : 'medium'}
                 aria-label={status === 'running' ? '暂停计时' : status === 'paused' ? '继续计时' : '开始计时'}
                 disabled={todo.completed}
-                onClick={() => (status === 'running' ? void pauseWork() : handlePlay())}
+                onClick={() => (status === 'running' ? void pauseWork(todo.id) : handlePlay())}
                 sx={{
                   ...(compact && { width: 34, height: 34, borderRadius: 2 }),
                   color: status === 'running' ? 'warning.main' : status === 'idle' ? '#fff' : 'primary.main',
@@ -323,7 +321,7 @@ function TodoRow({ todo, isActive, compact, canMoveUp = false, canMoveDown = fal
               <IconButton
                 size={compact ? 'small' : 'medium'}
                 aria-label="停止并结算用时"
-                onClick={() => void stopWork()}
+                onClick={() => void stopWork(todo.id)}
                 sx={{
                   ...(compact && { width: 34, height: 34, borderRadius: 2 }),
                   color: 'error.main', bgcolor: '#FEF2F2', '&:hover': { bgcolor: '#FEE2E2' } }}
@@ -380,10 +378,16 @@ interface TodoViewProps {
 
 export default function TodoView({ compact = false }: TodoViewProps): ReactElement {
   const todos = useAppStore((state) => state.todos);
-  const activeTodoId = useAppStore((state) => state.workTimer.activeTodoId);
+  const workEntries = useAppStore((state) => state.workTimer.entries);
   const addTodo = useAppStore((state) => state.addTodo);
   const reorderTodos = useAppStore((state) => state.reorderTodos);
   const [title, setTitle] = useState('');
+
+  // 多开并发：按 todoId 下传 entry，每行只看自己的计时状态（替代原单一 isActive）。
+  const entryByTodoId = useMemo(
+    () => new Map(workEntries.map((entry) => [entry.todoId, entry])),
+    [workEntries],
+  );
 
   // 拖拽排序：拖动期间用本地顺序即时预览（跟手交换），松手一次性提交最终顺序。
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
@@ -493,7 +497,7 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
             >
               <TodoRow
                 todo={todo}
-                isActive={activeTodoId === todo.id}
+                entry={entryByTodoId.get(todo.id)}
                 compact={compact}
                 canMoveUp={index > 0}
                 canMoveDown={index < mainTodos.length - 1}
@@ -521,7 +525,12 @@ export default function TodoView({ compact = false }: TodoViewProps): ReactEleme
             {showEarlier && (
               <List disablePadding sx={{ px: 0.5, pb: 0.5 }}>
                 {earlierTodos.map((todo) => (
-                  <TodoRow key={todo.id} todo={todo} isActive={false} compact={compact} />
+                  <TodoRow
+                    key={todo.id}
+                    todo={todo}
+                    entry={entryByTodoId.get(todo.id)}
+                    compact={compact}
+                  />
                 ))}
               </List>
             )}

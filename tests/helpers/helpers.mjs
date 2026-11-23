@@ -36,6 +36,18 @@ export function makeTodo(overrides = {}) {
   };
 }
 
+/** v2 运行态构造器：`makeRuntime([{ todoId: 'A', status: 'running', startedAt }])`。 */
+export function makeRuntime(entries = []) {
+  return {
+    timers: entries.map((entry) => ({
+      accumulatedBeforePauseMs: 0,
+      startedAt: null,
+      pauseStartedAt: null,
+      ...entry,
+    })),
+  };
+}
+
 /** In-memory fake of StoreService's public surface (deep-clones like the real store). */
 export function makeStore({ todos = [], settings, pomodoroRecords, pomodoroRuntime, workTimerRuntime, windows } = {}) {
   const data = createDefaultData();
@@ -64,9 +76,13 @@ export function makeStore({ todos = [], settings, pomodoroRecords, pomodoroRunti
     deleteTodo(id) {
       data.todos = data.todos.filter((item) => item.id !== id);
     },
-    moveTodoToTop(id) {
+    /** 与 StoreService.moveTodoToTimerBlockTop 同算法：插到第一个非 idle 项之前，无则 index 0。 */
+    moveTodoToTimerBlockTop(id) {
       const index = data.todos.findIndex((item) => item.id === id);
-      if (index > 0) data.todos.unshift(data.todos.splice(index, 1)[0]);
+      if (index < 0) return;
+      const [item] = data.todos.splice(index, 1);
+      const firstActive = data.todos.findIndex((entry) => entry.timingStatus !== 'idle');
+      data.todos.splice(firstActive >= 0 ? firstActive : 0, 0, item);
     },
     moveTodoToEnd(id) {
       const index = data.todos.findIndex((item) => item.id === id);
