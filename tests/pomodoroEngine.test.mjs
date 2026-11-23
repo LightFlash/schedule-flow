@@ -27,12 +27,10 @@ function setup({ config = { workMinutes: 1, breakMinutes: 1, rounds: 2 }, settin
       return Promise.resolve();
     },
   };
+  // 番茄钟只把工作计时视图态原样塞进 tick 载荷，用 v2 空视图桩即可。
   const engine = new PomodoroEngine(store, reminder, () => ({
-    status: 'idle',
-    activeTodoId: null,
-    activeTitle: '',
-    sessionElapsedMs: 0,
-    activeAccumulatedMs: 0,
+    entries: [],
+    totalSessionElapsedMs: 0,
   }));
   return { store, engine, reminders };
 }

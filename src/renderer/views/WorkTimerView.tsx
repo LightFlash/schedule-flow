@@ -148,8 +148,15 @@ export default function WorkTimerView(): ReactElement {
                 <Chip
                   size="small"
                   label={todo.completed ? '已完成' : STATUS_LABEL[todo.timingStatus]}
+                  // 暂停态用 warning 色，避免与「未开始」的灰色无从区分。
                   color={
-                    todo.completed ? 'success' : todo.timingStatus === 'running' ? 'primary' : 'default'
+                    todo.completed
+                      ? 'success'
+                      : todo.timingStatus === 'running'
+                        ? 'primary'
+                        : todo.timingStatus === 'paused'
+                          ? 'warning'
+                          : 'default'
                   }
                   variant="outlined"
                   sx={{ mr: 1 }}

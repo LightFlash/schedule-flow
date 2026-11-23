@@ -6,6 +6,7 @@
   "author": "Schedule Flow Team",
   "license": "MIT",
   "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

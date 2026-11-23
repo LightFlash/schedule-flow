@@ -27,7 +27,9 @@ export default defineConfig({
     },
     build: {
       outDir: 'out/renderer',
-      emptyOutDir: false,
+      // 每次构建清空 out/renderer：否则历史 hash 命名的 bundle 会无限堆积，
+      // 被 electron-builder 的 files: out/**/* 全量打进安装包（体积虚高 + 旧代码误导排查）。
+      emptyOutDir: true,
       rollupOptions: {
         input: resolve(__dirname, 'index.html'),
       },

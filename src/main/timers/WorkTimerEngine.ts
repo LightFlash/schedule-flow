@@ -185,10 +185,11 @@ export class WorkTimerEngine {
       const todo = byTodoId.get(entry.todoId);
       if (todo === undefined || todo.completed) continue;
       if (seen.has(entry.todoId)) continue;
-      seen.add(entry.todoId);
 
       if (entry.status === 'running') {
+        // 校验通过后才登记去重键：坏条目不算「已占用」，将来放宽去重时不会误丢合法条目。
         if (entry.startedAt === null) continue;
+        seen.add(entry.todoId);
         kept.push({
           ...entry,
           startedAt: Math.min(entry.startedAt, now),
@@ -196,6 +197,7 @@ export class WorkTimerEngine {
           pauseStartedAt: null,
         });
       } else {
+        seen.add(entry.todoId);
         kept.push({
           ...entry,
           startedAt: null,
