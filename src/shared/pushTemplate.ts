@@ -25,12 +25,12 @@ export const PUSH_EVENT_LABELS: Record<PushEventKey, string> = {
   pomodoroBreakEnd: '番茄-休息结束',
 };
 
-/** 设置界面在事件下方的可用变量提示。 */
+/** 设置界面在事件下方的可用变量提示（与实际传参保持一一对应，含 {time}）。 */
 export const PUSH_EVENT_VARIABLE_HINTS: Record<PushEventKey, string> = {
   workStart: '可用变量：{task} {time}',
   workStop: '可用变量：{task} {session} {total} {time}',
-  pomodoroWorkEnd: '可用变量：{round} {breakMinutes} {workMinutes}',
-  pomodoroBreakEnd: '可用变量：{round} {breakMinutes} {workMinutes}',
+  pomodoroWorkEnd: '可用变量：{round} {breakMinutes} {workMinutes} {time}',
+  pomodoroBreakEnd: '可用变量：{round} {breakMinutes} {workMinutes} {time}',
 };
 
 /** 占位符语法：`{name}`，name 只允许字母/数字/下划线，避免误伤正文里的大括号。 */
@@ -38,16 +38,6 @@ const PLACEHOLDER_PATTERN = /\{([A-Za-z0-9_]+)\}/g;
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
-}
-
-/** 运行时收窄：外部数据（配置文件 / 导入备份）里的字符串是否合法事件 key。 */
-export function isPushEventKey(value: unknown): value is PushEventKey {
-  return (
-    value === 'workStart' ||
-    value === 'workStop' ||
-    value === 'pomodoroWorkEnd' ||
-    value === 'pomodoroBreakEnd'
-  );
 }
 
 /**

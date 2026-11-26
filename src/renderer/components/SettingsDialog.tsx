@@ -6,7 +6,7 @@
  * 开机自启动独立于 Settings 快照，直接读写 OS 登录项（唯一数据源在主进程）。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import {
   Alert,
@@ -59,8 +59,22 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps): 
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [autoLaunchNote, setAutoLaunchNote] = useState('');
 
+  // 「本次打开是否已初始化草稿」：只在弹窗由关变开时从 store 同步一次。
+  // 打开期间主进程 DATA_CHANGED（番茄阶段结束、任一窗口开始/停止计时等）会让
+  // refreshData 每次都 set 一个**新的** settings 对象；若让下面的 effect 跟随
+  // settings 重跑，用户尚未保存的事件文案会被静默重置（R1 缺陷）。
+  const draftInitializedRef = useRef(false);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // 关闭即作废本次初始化标记：再次打开必须重新取最新设置快照。
+      draftInitializedRef.current = false;
+      return;
+    }
+    // 已打开且已初始化 → 直接返回，不因为 settings 对象被替换而重置草稿。
+    if (draftInitializedRef.current) return;
+    draftInitializedRef.current = true;
+
     setDraft(cloneSettings(settings));
     setTestResults(null);
     setTestError('');
@@ -83,7 +97,11 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps): 
     return () => {
       active = false;
     };
-  }, [open, settings]);
+    // 依赖**有意**只写 open：settings 仅用于「打开那一刻」的快照，
+    // 把它放进依赖会让打开期间的 store 刷新重置用户草稿（R1）；
+    // 同理不能用 settings 做 guard 条件，否则 guard 本身仍随 settings 变化。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const toggleChannel = (channel: PushChannel): void => {
     const channels = draft.push.channels.includes(channel)

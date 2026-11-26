@@ -6,17 +6,21 @@
  *   workStop 在 stop / stopAll / 勾选完成三条路径各发一次且变量正确；
  * - 配置兼容：settings 缺 events 时 ensureShape 补默认且不覆盖已有 JSON，
  *   老配置（无 events 字段）保存回读不丢原有凭证与番茄参数；
- * - 提醒接线：带 event 的提醒走事件模板，不带 event 的旧载荷仍走 sendPush。
+ * - 提醒接线：带 event 的提醒走事件模板，不带 event 的旧载荷仍走 sendPush；
+ * - 设置弹窗：草稿只在「由关变开」时初始化，不随 settings 刷新重置（R1 静态契约）。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   PUSH_EVENT_KEYS,
+  PUSH_EVENT_VARIABLE_HINTS,
   createDefaultPushEvents,
   formatPushTime,
   normalizePushEvents,
   renderPushTemplate,
 } from './.build/pushTemplate.mjs';
+import * as pushTemplateModule from './.build/pushTemplate.mjs';
 import { PushService } from './.build/pushService.mjs';
 import { ReminderService } from './.build/reminderService.mjs';
 import { PomodoroEngine } from './.build/pomodoroEngine.mjs';
@@ -559,4 +563,61 @@ test('老配置（无 events 字段）保存回读：凭证/番茄参数不丢�
   } finally {
     delete globalThis.__qaStoreSeed;
   }
+});
+
+// ===== 设置界面契约（R1 / R3 / R4 回归）=====
+
+/** 读取渲染层组件源码：React 组件无法在 Node 里渲染，这里用源码契约做回归护栏。 */
+function readSource(relativePath) {
+  return fs.readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
+}
+
+test('R1：设置弹窗草稿只在「由关变开」时初始化，依赖数组不得含 settings', () => {
+  const source = readSource('src/renderer/components/SettingsDialog.tsx');
+  const effect = source.match(/useEffect\(\(\) => \{([\s\S]*?)\n {2}\}, \[([^\]]*)\]\);/);
+  assert.ok(effect, '未找到初始化 useEffect（源码结构已变，请同步更新本断言）');
+  const [, body, deps] = effect;
+
+  assert.equal(
+    deps.trim(),
+    'open',
+    '初始化 effect 的依赖必须只有 open：加入 settings 会让打开期间的 store 刷新（DATA_CHANGED）重置用户未保存的草稿',
+  );
+  assert.doesNotMatch(deps, /settings/, 'settings 不得出现在依赖数组');
+  assert.match(body, /cloneSettings\(settings\)/, '打开时仍需从 store 取一次快照');
+  assert.match(
+    body,
+    /if \(draftInitializedRef\.current\) return;/,
+    '必须用 ref 做「本次打开已初始化」守卫，不得用 settings 做 guard 条件',
+  );
+  assert.match(body, /draftInitializedRef\.current = false;/, '关闭后必须作废标记，下次打开重新取快照');
+  assert.match(
+    body,
+    /eslint-disable-next-line react-hooks\/exhaustive-deps/,
+    '有意省略 settings 依赖必须写明理由注释',
+  );
+});
+
+test('R3：事件变量提示与实际传参一致（番茄事件补 {time}）', () => {
+  for (const key of PUSH_EVENT_KEYS) {
+    assert.match(PUSH_EVENT_VARIABLE_HINTS[key], /可用变量：/, `${key} 必须有变量提示`);
+  }
+  for (const key of ['pomodoroWorkEnd', 'pomodoroBreakEnd']) {
+    assert.match(PUSH_EVENT_VARIABLE_HINTS[key], /\{round\}/);
+    assert.match(PUSH_EVENT_VARIABLE_HINTS[key], /\{breakMinutes\}/);
+    assert.match(PUSH_EVENT_VARIABLE_HINTS[key], /\{workMinutes\}/);
+    assert.match(PUSH_EVENT_VARIABLE_HINTS[key], /\{time\}/, `${key} 实际传了 {time}，提示必须列出`);
+  }
+  assert.match(PUSH_EVENT_VARIABLE_HINTS.workStop, /\{session\}/);
+  assert.match(PUSH_EVENT_VARIABLE_HINTS.workStop, /\{total\}/);
+});
+
+test('R4：无调用的 isPushEventKey 已删除（不留死代码）', () => {
+  assert.equal(
+    Object.hasOwn(pushTemplateModule, 'isPushEventKey'),
+    false,
+    'isPushEventKey 全仓无调用，不应再导出',
+  );
+  const source = readSource('src/shared/pushTemplate.ts');
+  assert.doesNotMatch(source, /isPushEventKey/, '定义也必须删除');
 });
