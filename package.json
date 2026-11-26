@@ -1,12 +1,11 @@
 {
   "name": "schedule-flow",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "个人日程 + 工作汇总桌面工具",
   "main": "./out/main/index.js",
   "author": "Schedule Flow Team",
   "license": "MIT",
   "scripts": {
-    "prebuild": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

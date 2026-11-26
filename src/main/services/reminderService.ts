@@ -5,8 +5,8 @@
 
 import { BrowserWindow } from 'electron';
 import { IpcEvent } from '@shared/ipcChannels';
-import type { Settings, ReminderPayload, PushResult, UiMode } from '@shared/types';
-import type { PushService } from './pushService';
+import type { PushResult, ReminderPayload, Settings, UiMode } from '@shared/types';
+import type { PushSender } from './pushService';
 
 function emit(event: string, payload?: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -37,7 +37,7 @@ export class ReminderService {
   private readonly visibilitySnapshot = new Map<BrowserWindow, boolean>();
   private snapshotMode: UiMode | null = null;
 
-  constructor(private readonly push: PushService) {}
+  constructor(private readonly push: PushSender) {}
 
   /**
    * 注入「恢复各小窗自身 pinned」回调：强提醒的 screen-saver 级置顶是全局的，
@@ -81,8 +81,12 @@ export class ReminderService {
     if (!configured) return;
 
     // fire-and-forget：即便推送卡住或抛错也绝不阻塞本地提醒。
-    void this.push
-      .sendPush(settings.push, payload.title, payload.message)
+    // 带 event 的提醒走事件模板（番茄轮次），否则退回旧的「直接用 payload 文案」。
+    const request =
+      payload.event !== undefined && typeof this.push.sendEvent === 'function'
+        ? this.push.sendEvent(settings.push, payload.event, payload.vars ?? {})
+        : this.push.sendPush(settings.push, payload.title, payload.message);
+    void request
       .then((results: PushResult[]) => {
         const failed = results.filter((item) => !item.ok);
         if (failed.length > 0) {

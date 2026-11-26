@@ -10,6 +10,7 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import Store from 'electron-store';
 import { IpcEvent } from '@shared/ipcChannels';
+import { createDefaultPushEvents, normalizePushEvents } from '@shared/pushTemplate';
 import { createId } from '@shared/time';
 import { emptyWorkTimerRuntime, normalizeWorkTimerRuntime } from '@shared/workTimerRuntime';
 import type { DataExportResult } from '@shared/types';
@@ -51,7 +52,12 @@ export function createDefaultData(): AppData {
     version: 1,
     todos: [],
     settings: {
-      push: { serverChanKey: '', pushPlusToken: '', channels: [] },
+      push: {
+        serverChanKey: '',
+        pushPlusToken: '',
+        channels: [],
+        events: createDefaultPushEvents(),
+      },
       pomodoro: { ...pomodoroConfig },
       autoMarkComplete: false,
       autoBackup: true,
@@ -182,6 +188,9 @@ export class StoreService {
                   channel === 'serverchan' || channel === 'pushplus',
               )
             : defaults.settings.push.channels,
+          // 老配置（v1.0.3 及以前）没有 events 字段：整体落到默认模板；
+          // 已有配置只补缺失字段，用户填写过的标题/正文/开关一律保留。
+          events: normalizePushEvents(current.settings?.push?.events),
         },
         pomodoro: {
           workMinutes: clampNumber(
@@ -396,6 +405,8 @@ export class StoreService {
                 channel === 'serverchan' || channel === 'pushplus',
             )
           : [],
+        // 事件配置逐字段补全：界面传来的草稿可能来自旧数据（缺 events / 少某个事件）。
+        events: normalizePushEvents(input?.push?.events),
       },
       pomodoro: {
         workMinutes: clampNumber(input?.pomodoro?.workMinutes, 25, 1, 240),

@@ -20,6 +20,7 @@ fs.mkdirSync(buildDir, { recursive: true });
 const entryPoints = {
   time: path.join(root, 'src/shared/time.ts'),
   ipcChannels: path.join(root, 'src/shared/ipcChannels.ts'),
+  pushTemplate: path.join(root, 'src/shared/pushTemplate.ts'),
   workTimerRuntime: path.join(root, 'src/shared/workTimerRuntime.ts'),
   store: path.join(root, 'src/main/store.ts'),
   windows: path.join(root, 'src/main/windows.ts'),

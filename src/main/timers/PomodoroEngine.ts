@@ -7,6 +7,7 @@
 
 import { BrowserWindow } from 'electron';
 import { IpcEvent } from '@shared/ipcChannels';
+import { formatPushTime } from '@shared/pushTemplate';
 import { createId, minutesToMs } from '@shared/time';
 import type {
   PomodoroConfig,
@@ -262,7 +263,7 @@ export class PomodoroEngine {
 
     // 提醒（含推送）在后台进行，不阻塞计时推进。
     void this.reminder.trigger(
-      this.buildReminderPayload(previous, nextRound, allDone),
+      this.buildReminderPayload(previous, nextRound, allDone, now),
       this.store.getSettings(),
     );
 
@@ -271,11 +272,23 @@ export class PomodoroEngine {
     }
   }
 
+  /**
+   * 组装提醒载荷：本地强提醒文案（title/message）保持原样，
+   * 另附 `event` + `vars` 供推送层渲染用户自定义模板。
+   * - 工作轮结束 → pomodoroWorkEnd，`{round}` = 刚完成的轮次；
+   * - 休息结束（含最后一轮全部完成） → pomodoroBreakEnd，`{round}` = 即将开始的轮次。
+   */
   private buildReminderPayload(
     previous: PomodoroRuntime,
     nextRound: number,
     allDone: boolean,
+    now: number,
   ): ReminderPayload {
+    const commonVars = {
+      breakMinutes: previous.config.breakMinutes,
+      workMinutes: previous.config.workMinutes,
+      time: formatPushTime(now),
+    };
     if (previous.phase === 'work') {
       // work 结束时 nextRound 仍等于当前轮；文案需单独推进到"即将开始"的轮次。
       const upcomingRound = Math.min(previous.currentRound + 1, previous.totalRounds);
@@ -287,6 +300,8 @@ export class PomodoroEngine {
         phase: 'work',
         title: `第 ${previous.currentRound} 轮工作结束，休息一下`,
         message,
+        event: 'pomodoroWorkEnd',
+        vars: { ...commonVars, round: previous.currentRound },
       };
     }
     if (allDone) {
@@ -294,12 +309,16 @@ export class PomodoroEngine {
         phase: 'break',
         title: '全部轮次完成！',
         message: `已完成 ${previous.totalRounds} 轮专注，记得起身活动一下。`,
+        event: 'pomodoroBreakEnd',
+        vars: { ...commonVars, round: previous.totalRounds },
       };
     }
     return {
       phase: 'break',
       title: '休息结束，继续专注',
       message: `第 ${nextRound} 轮工作 ${previous.config.workMinutes} 分钟，开始吧。`,
+      event: 'pomodoroBreakEnd',
+      vars: { ...commonVars, round: nextRound },
     };
   }
 

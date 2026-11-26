@@ -5,6 +5,7 @@
  */
 
 import { create } from 'zustand';
+import { createDefaultPushEvents } from '@shared/pushTemplate';
 import { minutesToMs } from '@shared/time';
 import type {
   AppData,
@@ -172,7 +173,12 @@ function subscribeEvents(): void {
 export const useAppStore = create<AppState>()((set, get) => ({
   todos: [],
   settings: {
-    push: { serverChanKey: '', pushPlusToken: '', channels: [] },
+    push: {
+      serverChanKey: '',
+      pushPlusToken: '',
+      channels: [],
+      events: createDefaultPushEvents(),
+    },
     pomodoro: { ...defaultConfig },
     autoMarkComplete: false,
     autoBackup: true,

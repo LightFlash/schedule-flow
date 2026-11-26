@@ -1,6 +1,8 @@
 /**
- * 设置弹窗：推送渠道与凭证（密码态）、测试推送、番茄默认参数、自动标记完成、开机自启动。
+ * 设置弹窗：推送渠道与凭证（密码态）、测试推送、事件推送（按事件开关 + 自定义文案）、
+ * 番茄默认参数、自动标记完成、开机自启动。
  * 渠道支持同时勾选多个（决策2：两渠道可同时配置同时推送）。
+ * 事件文案只写草稿，随「保存」一次性落盘；关闭应取消则丢弃。
  * 开机自启动独立于 Settings 快照，直接读写 OS 登录项（唯一数据源在主进程）。
  */
 
@@ -21,7 +23,13 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import type { PushChannel, PushResult, Settings } from '@shared/types';
+import type { PushChannel, PushEventConfig, PushEventKey, PushResult, Settings } from '@shared/types';
+import {
+  PUSH_EVENT_KEYS,
+  PUSH_EVENT_LABELS,
+  PUSH_EVENT_VARIABLE_HINTS,
+  createDefaultPushEvents,
+} from '@shared/pushTemplate';
 import { bridge } from '../api/bridge';
 import { useAppStore } from '../store/useAppStore';
 
@@ -82,6 +90,21 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps): 
       ? draft.push.channels.filter((item) => item !== channel)
       : [...draft.push.channels, channel];
     setDraft({ ...draft, push: { ...draft.push, channels } });
+  };
+
+  /** 事件推送草稿：老数据缺 events 时按默认模板补全，保证受控输入永远有值。 */
+  const pushEvents = draft.push.events ?? createDefaultPushEvents();
+
+  /** 只改草稿，随「保存」一起落盘；关闭弹窗即丢弃。 */
+  const updateEvent = (key: PushEventKey, patch: Partial<PushEventConfig>): void => {
+    const events = draft.push.events ?? createDefaultPushEvents();
+    setDraft({
+      ...draft,
+      push: {
+        ...draft.push,
+        events: { ...events, [key]: { ...events[key], ...patch } },
+      },
+    });
   };
 
   const commitNumber = (field: 'workMinutes' | 'breakMinutes' | 'rounds', value: string): void => {
@@ -194,6 +217,69 @@ export default function SettingsDialog({ open, onClose }: SettingsDialogProps): 
                 ))}
               </Box>
             )}
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              事件推送
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              每类事件可单独开关并自定义文案；花括号是占位变量，未识别的变量会原样保留。
+            </Typography>
+            <Stack spacing={1.5}>
+              {PUSH_EVENT_KEYS.map((eventKey) => {
+                const entry = pushEvents[eventKey] ?? createDefaultPushEvents()[eventKey];
+                return (
+                  <Box
+                    key={eventKey}
+                    sx={{
+                      p: 1.5,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                    }}
+                  >
+                    <FormControlLabel
+                      sx={{ mb: 0.5 }}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={entry.enabled}
+                          onChange={(event) =>
+                            updateEvent(eventKey, { enabled: event.target.checked })
+                          }
+                        />
+                      }
+                      label={PUSH_EVENT_LABELS[eventKey]}
+                    />
+                    <TextField
+                      label="标题"
+                      size="small"
+                      fullWidth
+                      value={entry.title}
+                      onChange={(event) => updateEvent(eventKey, { title: event.target.value })}
+                      sx={{ mb: 1 }}
+                    />
+                    <TextField
+                      label="内容"
+                      size="small"
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      value={entry.body}
+                      onChange={(event) => updateEvent(eventKey, { body: event.target.value })}
+                    />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block', mt: 0.75 }}
+                    >
+                      {PUSH_EVENT_VARIABLE_HINTS[eventKey]}
+                    </Typography>
+                  </Box>
+                );
+              })}
+            </Stack>
           </Box>
 
           <Divider />

@@ -20,8 +20,8 @@
 
 到 [Releases](https://github.com/LightFlash/schedule-flow/releases) 页面下载：
 
-- **安装版**：`Schedule Flow-1.0.3-x64.exe`，双击按向导安装（可自选目录，创建桌面/开始菜单快捷方式）。
-- **便携版**：`Schedule-Flow-1.0.3-portable.rar`，用 WinRAR / 7-Zip / Bandizip 解压后运行 `Schedule Flow.exe`，免安装、可放 U 盘。
+- **安装版**：`Schedule Flow-1.0.4-x64.exe`，双击按向导安装（可自选目录，创建桌面/开始菜单快捷方式）。
+- **便携版**：`Schedule-Flow-1.0.4-portable.rar`，用 WinRAR / 7-Zip / Bandizip 解压后运行 `Schedule Flow.exe`，免安装、可放 U 盘。
 
 > 首次运行若被 Windows Defender / 杀软提示，选择"允许"（Electron 应用未做代码签名）。
 
@@ -32,6 +32,7 @@
 - 圆环倒计时 + 轮次进度点；开始/暂停/继续/重置
 - 到点**强提醒**：窗口置顶 + 高亮闪烁 + 需手动确认
 - 可选**微信推送**（Server酱 / PushPlus，双渠道同发）
+- **按事件分别开关与自定义文案**：工作开始 / 工作结束 / 番茄工作轮结束 / 番茄休息结束，各事件独立开关，标题与正文可用 `{task}` `{session}` `{total}` `{time}` `{round}` `{breakMinutes}` `{workMinutes}` 等变量
 
 **✅ TODO 清单**
 - 新建/编辑/完成勾选/删除（二次确认）
@@ -67,8 +68,9 @@
 1. 「设置」中选择渠道：
    - **Server酱 Turbo**：<https://sct.ftqq.com/> 微信扫码登录，复制 `SCT` 开头的 SendKey
    - **PushPlus**：<https://www.pushplus.plus/> 微信扫码登录，复制 Token
-2. 粘贴保存后点「测试推送」确认手机收到
+2. 粘贴保存后点「测试推送」确认手机收到（测试推送只验证通道，不套用事件模板）
 3. 两渠道可同时启用；推送失败不影响本地窗口强提醒
+4. 「设置 → 事件推送」里按事件分别开关、改标题/正文：工作开始（默认关闭）、工作结束、番茄工作轮结束、番茄休息结束；`{变量}` 未识别时原样保留，便于排查
 
 ## 从源码构建（Windows，Node ≥ 18）
 
@@ -85,10 +87,10 @@ npm run dist        # 打包安装包到 dist/
 ## 测试
 
 ```bash
-node tests/run.mjs   # 64 项测试（零第三方依赖，Node 内置 test runner）
+node tests/run.mjs   # 111 项测试（零第三方依赖，Node 内置 test runner）
 ```
 
-覆盖：时间工具、汇总周期、番茄/工作计时状态机、提醒与推送、IPC 契约（三端一致性）、托盘与多窗口行为、开机自启、全新安装语义、窗口几何边界。
+覆盖：时间工具、汇总周期、番茄/工作计时状态机、提醒与推送、事件推送模板与接线、IPC 契约（三端一致性）、托盘与多窗口行为、开机自启、全新安装语义、窗口几何边界。
 
 ## 目录结构
 

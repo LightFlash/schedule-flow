@@ -16,8 +16,13 @@ import {
   sessionElapsedMsOf,
   timingStatusOf,
 } from '@shared/workTimerRuntime';
+import { formatPushTime } from '@shared/pushTemplate';
+import { formatDuration } from '@shared/time';
 import type {
   IpcResult,
+  PushEventKey,
+  PushEventVars,
+  PushResult,
   TimingStatus,
   Todo,
   WorkTimerEntry,
@@ -27,9 +32,24 @@ import type {
   WorkTimerViewState,
 } from '@shared/types';
 import type { StoreService } from '../store';
+import type { PushSender } from '../services/pushService';
+
+/** 结算结果摘要：既用于写回 TODO，也用于拼装 workStop 推送模板变量。 */
+interface SettledSummary {
+  task: string;
+  sessionMs: number;
+  totalMs: number;
+}
 
 export class WorkTimerEngine {
-  constructor(private readonly store: StoreService) {}
+  /**
+   * @param store 主进程唯一数据源
+   * @param push 事件推送（可选）：未注入时引擎完全不发推送，计时逻辑不变。
+   */
+  constructor(
+    private readonly store: StoreService,
+    private readonly push: PushSender | null = null,
+  ) {}
 
   /**
    * 开始 / 继续指定工作项。
@@ -64,6 +84,8 @@ export class WorkTimerEngine {
     this.store.updateTodo(todoId, { timingStatus: 'running' });
     // 新开计时自动置顶（移到计时区块最上方），其它项相对顺序不变。
     this.store.moveTodoToTimerBlockTop(todoId);
+    // 只有 idle → running 的「首次开始」推送；暂停后继续（resume 分支）不发。
+    this.notifyEvent('workStart', { task: todo.title, time: formatPushTime(now) });
     return { ok: true, message: '已开始计时' };
   }
 
@@ -119,7 +141,8 @@ export class WorkTimerEngine {
     if (entry === undefined) return { ok: true };
 
     this.saveRuntime({ timers: runtime.timers.filter((item) => item.todoId !== todoId) });
-    this.settle(entry, Date.now());
+    const now = Date.now();
+    this.notifyWorkStop(this.settle(entry, now), now);
     return { ok: true };
   }
 
@@ -132,7 +155,10 @@ export class WorkTimerEngine {
     // 先一次性清空运行态，再逐条结算：即使中途某条目标已消失，也不会残留运行态。
     this.saveRuntime(emptyWorkTimerRuntime());
     const now = Date.now();
-    for (const entry of entries) this.settle(entry, now);
+    for (const entry of entries) {
+      // 每条都算一次 workStop：全部停止是用户显式终止，与单项停止语义一致。
+      this.notifyWorkStop(this.settle(entry, now), now);
+    }
     return { ok: true, data: entries.length };
   }
 
@@ -245,14 +271,16 @@ export class WorkTimerEngine {
   /**
    * 单条结算：`accumulatedMs += 本次会话`、写 `lastTimingAt`、`timingStatus=idle`；
    * autoMarkComplete 只对触发结算的这一项生效并沉底。
+   * 返回本次/累计用时摘要（供 workStop 推送），目标已消失时返回 null。
    */
-  private settle(entry: WorkTimerEntry, now: number): void {
+  private settle(entry: WorkTimerEntry, now: number): SettledSummary | null {
     const todo: Todo | undefined = this.store
       .getTodos()
       .find((item) => item.id === entry.todoId);
-    if (todo === undefined) return;
+    if (todo === undefined) return null;
 
     const sessionMs = sessionElapsedMsOf(entry, now);
+    const totalMs = todo.accumulatedMs + sessionMs;
     const autoMarkComplete = this.store.getSettings().autoMarkComplete;
     this.store.updateTodo(todo.id, {
       accumulatedMs: todo.accumulatedMs + sessionMs,
@@ -262,5 +290,47 @@ export class WorkTimerEngine {
     });
     // 开启 autoMarkComplete 时停止即完成，与勾选完成行为一致地沉底。
     if (autoMarkComplete) this.store.moveTodoToEnd(todo.id);
+    return { task: todo.title, sessionMs, totalMs };
+  }
+
+  /**
+   * 统一的 workStop 推送入口：单项停止 / 全部停止 / 勾选完成（IPC 里调用 stop）
+   * 三条路径都经由 settle → notifyWorkStop，文案与变量口径完全一致。
+   */
+  private notifyWorkStop(settled: SettledSummary | null, now: number): void {
+    if (settled === null) return;
+    this.notifyEvent('workStop', {
+      task: settled.task,
+      session: formatDuration(settled.sessionMs),
+      total: formatDuration(settled.totalMs),
+      time: formatPushTime(now),
+    });
+  }
+
+  /**
+   * fire-and-forget 推送：绝不同步等待网络，也绝不因推送异常影响计时。
+   * 事件未启用 / 未配置渠道由 PushService.sendEvent 直接返回空数组，这里不重复判断。
+   */
+  private notifyEvent(event: PushEventKey, vars: PushEventVars): void {
+    if (this.push === null) return;
+    const sendEvent = this.push.sendEvent;
+    if (typeof sendEvent !== 'function') return;
+    try {
+      const settings = this.store.getSettings();
+      void sendEvent
+        .call(this.push, settings.push, event, vars)
+        .then((results: PushResult[]) => {
+          const failed = results.filter((item) => !item.ok);
+          if (failed.length > 0) {
+            console.warn('[WorkTimerEngine] 推送未全部成功：', failed);
+          }
+        })
+        .catch((error: unknown) => {
+          console.warn('[WorkTimerEngine] 推送异常已被吞掉：', error);
+        });
+    } catch (error) {
+      // 同步抛出（例如设置读取失败）同样不影响计时。
+      console.warn('[WorkTimerEngine] 推送调用失败已被吞掉：', error);
+    }
   }
 }

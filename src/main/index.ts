@@ -76,7 +76,8 @@ void app.whenReady().then(() => {
   storeService = store;
   const push = new PushService();
   const reminder = new ReminderService(push);
-  const workTimer = new WorkTimerEngine(store);
+  // 工作计时引擎也参与事件推送（工作开始 / 工作结束），共用同一个 PushService。
+  const workTimer = new WorkTimerEngine(store, push);
   const pomodoro = new PomodoroEngine(store, reminder, () => workTimer.getViewState());
   pomodoroEngine = pomodoro;
   const summary = new SummaryService(store);

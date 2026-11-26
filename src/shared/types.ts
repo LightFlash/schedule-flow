@@ -61,10 +61,25 @@ export interface PomodoroConfig {
   rounds: number;
 }
 
+/** 四类可推送事件：工作计时开始/停止、番茄工作轮结束/休息结束。 */
+export type PushEventKey = 'workStart' | 'workStop' | 'pomodoroWorkEnd' | 'pomodoroBreakEnd';
+
+/** 单个事件的推送配置：独立开关 + 可自定义标题/正文（含 `{var}` 占位符）。 */
+export interface PushEventConfig {
+  enabled: boolean;
+  title: string;
+  body: string;
+}
+
+/** 模板变量表：值统一字符串化后替换，缺失的 key 视为「未知变量」原样保留。 */
+export type PushEventVars = Record<string, string | number | null | undefined>;
+
 export interface PushConfig {
   serverChanKey: string;
   pushPlusToken: string;
   channels: PushChannel[];
+  /** 按事件分类型的推送配置；老配置缺失时由 store.ensureShape 补默认值。 */
+  events: Record<PushEventKey, PushEventConfig>;
 }
 
 export interface Settings {
@@ -206,6 +221,13 @@ export interface ReminderPayload {
   phase: PomodoroPhase;
   title: string;
   message: string;
+  /**
+   * 触发本次提醒的推送事件；缺省时沿用「直接用 title/message 推送」的旧行为
+   * （兼容手动提醒与历史调用方）。
+   */
+  event?: PushEventKey;
+  /** 事件模板变量（round / breakMinutes / workMinutes 等）。 */
+  vars?: PushEventVars;
 }
 
 // ===== IPC 载荷类型 =====
